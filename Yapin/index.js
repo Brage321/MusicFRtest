@@ -58,13 +58,16 @@ async function resolveTrack(query) {
 function playbackErrorMessage(error) {
     const message = error instanceof Error ? error.message : String(error);
     if (/header overflow/i.test(message)) {
-        return 'YouTube returned headers larger than Node.js accepts by default. Restart with the latest Yapin startup command, which raises Node.js\'s HTTP header limit to 64 KB.';
+        return 'The audio service returned a response that was too large. Please try again later.';
     }
     if (/sign in to confirm.*not a bot|confirm you.re not a bot/i.test(message)) {
-        return 'YouTube rejected this request as automated traffic. You can try setting YOUTUBE_COOKIE as a secret environment variable in your host, but YouTube may still block playback from the hosting server. Never paste cookies into chat or source code.';
+        return 'This track could not be streamed from this server. Please try another track.';
+    }
+    if (/blocked this server|could not be initialized|no matching playable track/i.test(message)) {
+        return 'No playable version of this track was found. Please try another track.';
     }
 
-    return message;
+    return 'An audio playback error occurred. Please try another track.';
 }
 
 function isYouTubeBotBlock(error) {
@@ -131,7 +134,7 @@ async function getTrackStream(track) {
                 try {
                     return {
                         audio: await play.stream(result.permalink),
-                        track: { ...track, title: result.name || track.title, source: 'SoundCloud' }
+                        track: { ...track, title: result.name || track.title, source: 'fallback' }
                     };
                 } catch (fallbackError) {
                     console.warn(`SoundCloud fallback failed for "${result.name}": ${fallbackError.message}`);
@@ -159,8 +162,7 @@ async function streamTrack(state, track) {
     }
 
     try {
-        const source = playback.track.source === 'SoundCloud' ? ' (SoundCloud fallback)' : '';
-        await bot.send(state.textChannelId, `🎵 Now playing${source}: **${track.title}**`);
+        await bot.send(state.textChannelId, `🎵 Now playing: **${track.title}**`);
     } catch (error) {
         console.error('Could not announce playback:', error);
     }
