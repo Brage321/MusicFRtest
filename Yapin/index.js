@@ -72,16 +72,33 @@ function isYouTubeBotBlock(error) {
     return /sign in to confirm.*not a bot|confirm you.re not a bot/i.test(message);
 }
 
+async function initializeSoundCloud() {
+    const clientId = process.env.SOUNDCLOUD_CLIENT_ID || await play.getFreeClientID();
+    if (!clientId) {
+        throw new Error('No SoundCloud client ID is available.');
+    }
+
+    await play.setToken({ soundcloud: { client_id: clientId } });
+}
+
 async function getTrackStream(track) {
     try {
         return { audio: await play.stream(track.url), track };
     } catch (error) {
         if (track.source !== 'youtube' || !isYouTubeBotBlock(error)) throw error;
 
-        const results = await play.search(track.title, {
-            limit: 5,
-            source: { soundcloud: 'tracks' }
-        });
+        let results;
+        try {
+            await initializeSoundCloud();
+            results = await play.search(track.title, {
+                limit: 5,
+                source: { soundcloud: 'tracks' }
+            });
+        } catch (fallbackError) {
+            throw new Error(`YouTube blocked this server and SoundCloud search failed: ${fallbackError.message}`, {
+                cause: fallbackError
+            });
+        }
 
         for (const result of results) {
             if (!result.permalink) continue;
