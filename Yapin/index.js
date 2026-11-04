@@ -11,6 +11,10 @@ if (!token) {
     throw new Error('Set YAPPER_BOT_TOKEN in your environment or .env file.');
 }
 
+if (process.env.YOUTUBE_COOKIE) {
+    await play.setToken({ youtube: { cookie: process.env.YOUTUBE_COOKIE } });
+}
+
 const bot = new Bot(token);
 const servers = new Map();
 const playLocks = new Map();
@@ -49,6 +53,15 @@ async function resolveTrack(query) {
     if (!video?.url || !video.title) return null;
 
     return { title: video.title, url: video.url };
+}
+
+function playbackErrorMessage(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/sign in to confirm.*not a bot|confirm you.re not a bot/i.test(message)) {
+        return 'YouTube rejected this request as automated traffic. You can try setting YOUTUBE_COOKIE as a secret environment variable in your host, but YouTube may still block playback from the hosting server. Never paste cookies into chat or source code.';
+    }
+
+    return message;
 }
 
 async function streamTrack(state, track) {
@@ -200,7 +213,7 @@ async function runQueue(serverId, state) {
             } catch (error) {
                 console.error(`Playback failed in server ${serverId}:`, error);
                 try {
-                    await bot.send(state.textChannelId, `⚠️ Could not play **${track.title}**: ${error.message}`);
+                    await bot.send(state.textChannelId, `⚠️ Could not play **${track.title}**: ${playbackErrorMessage(error)}`);
                 } catch (sendError) {
                     console.error(`Could not report playback failure in server ${serverId}:`, sendError);
                 }
@@ -272,7 +285,7 @@ bot.command('play', 'Play a YouTube song or add it to the server queue', async (
         });
     } catch (error) {
         console.error('Yapin play command failed:', error);
-        await message.reply(`Could not add that song: ${error.message}`);
+        await message.reply(`Could not add that song: ${playbackErrorMessage(error)}`);
     }
 });
 

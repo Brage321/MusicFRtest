@@ -13,6 +13,10 @@ The official [Yapin JavaScript SDK](https://yapin.gg/sdk/yapper.js) is included 
 
 For Bot-Hosting.net, set the startup command to `npm run start:yapin` and add `YAPPER_BOT_TOKEN` as a masked secret environment variable. The root script installs this folder's production dependencies before launch.
 
+### YouTube "Sign in to confirm you're not a bot"
+
+YouTube may reject requests from hosting-provider IP addresses. The bot accepts an optional `YOUTUBE_COOKIE` value (the YouTube cookies in request-header format) and passes it to `play-dl`. Add it only as a **secret environment variable** in the hosting panel; never commit or share it. A cookie may not resolve IP-based blocking, and YouTube can invalidate it. If playback is still blocked, this host/IP cannot reliably play that YouTube video; try another supported audio source instead. Avoid using your primary Google account session cookies.
+
 The bot needs permission to view voice channels and connect. It supports `/play`, `/queue`, `/skip`, and `/stop`. `/play` searches YouTube and joins the voice channel of the person who invoked it. Each server has one queue and one voice connection; tracks play sequentially.
 
 Yapin's voice-join API is currently documented as in testing and limited to 10 joins/leaves per minute. This MVP uses `play-dl` for YouTube search/streaming, `ffmpeg-static` to decode audio, and Yapin's LiveKit voice API to publish it. Spotify and saved-playlist features from the Discord bot are not included in this initial port.
