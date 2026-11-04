@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+.npm/
+node_modules/
+Yapin/node_modules/
+database/groove_music.db
+*.log
