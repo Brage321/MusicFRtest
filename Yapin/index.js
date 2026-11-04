@@ -44,7 +44,7 @@ async function resolveTrack(query) {
     if (play.yt_validate(query) === 'video') {
         const info = await play.video_basic_info(query);
         const video = info.video_details;
-        if (video?.url && video.title) return { title: video.title, url: video.url };
+        if (video?.url && video.title) return { title: video.title, url: video.url, source: 'youtube' };
         return null;
     }
 
@@ -52,7 +52,7 @@ async function resolveTrack(query) {
     const video = results[0];
     if (!video?.url || !video.title) return null;
 
-    return { title: video.title, url: video.url };
+    return { title: video.title, url: video.url, source: 'youtube' };
 }
 
 function playbackErrorMessage(error) {
@@ -67,17 +67,59 @@ function playbackErrorMessage(error) {
     return message;
 }
 
+function isYouTubeBotBlock(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return /sign in to confirm.*not a bot|confirm you.re not a bot/i.test(message);
+}
+
+async function getTrackStream(track) {
+    try {
+        return { audio: await play.stream(track.url), track };
+    } catch (error) {
+        if (track.source !== 'youtube' || !isYouTubeBotBlock(error)) throw error;
+
+        const results = await play.search(track.title, {
+            limit: 5,
+            source: { soundcloud: 'tracks' }
+        });
+
+        for (const result of results) {
+            if (!result.permalink) continue;
+
+            try {
+                return {
+                    audio: await play.stream(result.permalink),
+                    track: { ...track, title: result.name || track.title, source: 'SoundCloud' }
+                };
+            } catch (fallbackError) {
+                console.warn(`SoundCloud fallback failed for "${result.name}": ${fallbackError.message}`);
+            }
+        }
+
+        throw new Error('YouTube blocked this server and no matching SoundCloud track could be played.');
+    }
+}
+
 async function streamTrack(state, track) {
     if (state.stopping || state.skipRequested) {
         state.skipRequested = false;
         return;
     }
 
-    const audio = await play.stream(track.url);
+    const playback = await getTrackStream(track);
+    const audio = playback.audio;
+    track.title = playback.track.title;
     if (state.stopping || state.skipRequested) {
         state.skipRequested = false;
         audio.stream.destroy();
         return;
+    }
+
+    try {
+        const source = playback.track.source === 'SoundCloud' ? ' (SoundCloud fallback)' : '';
+        await bot.send(state.textChannelId, `🎵 Now playing${source}: **${track.title}**`);
+    } catch (error) {
+        console.error('Could not announce playback:', error);
     }
 
     const ffmpeg = spawn(ffmpegExecutable, [
@@ -207,11 +249,6 @@ async function runQueue(serverId, state) {
                     state.call = await bot.connectVoice(rtc, serverId, state.voiceChannelId);
                 }
 
-                try {
-                    await bot.send(state.textChannelId, `🎵 Now playing: **${track.title}**`);
-                } catch (error) {
-                    console.error(`Could not announce playback in server ${serverId}:`, error);
-                }
                 await streamTrack(state, track);
             } catch (error) {
                 console.error(`Playback failed in server ${serverId}:`, error);

@@ -15,7 +15,7 @@ For Bot-Hosting.net, set the startup command to `npm run start:yapin` and add `Y
 
 ### YouTube "Sign in to confirm you're not a bot"
 
-YouTube may reject requests from hosting-provider IP addresses. The bot accepts an optional `YOUTUBE_COOKIE` value (the YouTube cookies in request-header format) and passes it to `play-dl`. Add it only as a **secret environment variable** in the hosting panel; never commit or share it. A cookie may not resolve IP-based blocking, and YouTube can invalidate it. If playback is still blocked, this host/IP cannot reliably play that YouTube video; try another supported audio source instead. Avoid using your primary Google account session cookies.
+YouTube may reject requests from hosting-provider IP addresses. When YouTube playback is blocked, the bot now searches SoundCloud for a matching track and tries that instead. The bot accepts an optional `YOUTUBE_COOKIE` value (YouTube cookies in request-header format) and passes it to `play-dl`; add it only as a **secret environment variable** in the hosting panel, never commit or share it. Cookies may not resolve IP-based blocking and can be invalidated. Avoid using your primary Google account session cookies. If both services block or lack the track, playback cannot continue for that song.
 
 The bot needs permission to view voice channels and connect. It supports `/play`, `/queue`, `/skip`, and `/stop`. `/play` searches YouTube and joins the voice channel of the person who invoked it. Each server has one queue and one voice connection; tracks play sequentially.
 
