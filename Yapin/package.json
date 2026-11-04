@@ -7,7 +7,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node --max-http-header-size=65536 index.js"
   },
   "dependencies": {
     "@livekit/rtc-node": "^1.2.1",

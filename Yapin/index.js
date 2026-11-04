@@ -57,6 +57,9 @@ async function resolveTrack(query) {
 
 function playbackErrorMessage(error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (/header overflow/i.test(message)) {
+        return 'YouTube returned headers larger than Node.js accepts by default. Restart with the latest Yapin startup command, which raises Node.js\'s HTTP header limit to 64 KB.';
+    }
     if (/sign in to confirm.*not a bot|confirm you.re not a bot/i.test(message)) {
         return 'YouTube rejected this request as automated traffic. You can try setting YOUTUBE_COOKIE as a secret environment variable in your host, but YouTube may still block playback from the hosting server. Never paste cookies into chat or source code.';
     }

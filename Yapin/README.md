@@ -11,7 +11,7 @@ This is a separate Yapin bot entry point; it does not replace the Discord bot.
 
 The official [Yapin JavaScript SDK](https://yapin.gg/sdk/yapper.js) is included in this folder. If your environment blocks the `ffmpeg-static` install script, install FFmpeg separately and set `FFMPEG_PATH` to its executable.
 
-For Bot-Hosting.net, set the startup command to `npm run start:yapin` and add `YAPPER_BOT_TOKEN` as a masked secret environment variable. The root script installs this folder's production dependencies before launch.
+For Bot-Hosting.net, set the startup command to `npm run start:yapin` and add `YAPPER_BOT_TOKEN` as a masked secret environment variable. The root script installs this folder's production dependencies before launch. The Yapin start script sets Node's HTTP header limit to 64 KB to accommodate large headers returned by YouTube.
 
 ### YouTube "Sign in to confirm you're not a bot"
 

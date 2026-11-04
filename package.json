@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node Groove/index.js",
     "prestart:yapin": "npm install --prefix Yapin --omit=dev",
-    "start:yapin": "node Yapin/index.js"
+    "start:yapin": "node --max-http-header-size=65536 Yapin/index.js"
   },
   "keywords": [
     "discord",
