@@ -4,15 +4,11 @@ import { existsSync } from 'node:fs';
 import { Bot } from './yapper.js';
 import * as rtc from '@livekit/rtc-node';
 import ffmpegPath from 'ffmpeg-static';
-import play from 'play-dl';
+import { getTrackStream, resolveTrackUrl, searchTracks } from './audius.js';
 
 const token = process.env.YAPPER_BOT_TOKEN;
 if (!token) {
     throw new Error('Set YAPPER_BOT_TOKEN in your environment or .env file.');
-}
-
-if (process.env.YOUTUBE_COOKIE) {
-    await play.setToken({ youtube: { cookie: process.env.YOUTUBE_COOKIE } });
 }
 
 const bot = new Bot(token);
@@ -41,109 +37,23 @@ async function findCallerVoiceChannel(message) {
 }
 
 async function resolveTrack(query) {
-    if (play.yt_validate(query) === 'video') {
-        const info = await play.video_basic_info(query);
-        const video = info.video_details;
-        if (video?.url && video.title) return { title: video.title, url: video.url, source: 'youtube' };
-        return null;
+    if (/^https?:\/\//i.test(query)) {
+        return resolveTrackUrl(query);
     }
 
-    const results = await play.search(query, { limit: 1, source: { youtube: 'video' } });
-    const video = results[0];
-    if (!video?.url || !video.title) return null;
+    const results = await searchTracks(query);
+    const track = results[0];
+    if (!track) return null;
 
-    return { title: video.title, url: video.url, source: 'youtube' };
+    return {
+        ...track,
+        title: track.artist ? `${track.artist} - ${track.title}` : track.title
+    };
 }
 
 function playbackErrorMessage(error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (/header overflow/i.test(message)) {
-        return 'The audio service returned a response that was too large. Please try again later.';
-    }
-    if (/sign in to confirm.*not a bot|confirm you.re not a bot/i.test(message)) {
-        return 'This track could not be streamed from this server. Please try another track.';
-    }
-    if (/blocked this server|could not be initialized|no matching playable track/i.test(message)) {
-        return 'No playable version of this track was found. Please try another track.';
-    }
-
     return 'An audio playback error occurred. Please try another track.';
-}
-
-function isYouTubeBotBlock(error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return /sign in to confirm.*not a bot|confirm you.re not a bot/i.test(message);
-}
-
-async function initializeSoundCloud() {
-    const clientId = process.env.SOUNDCLOUD_CLIENT_ID || await play.getFreeClientID();
-    if (!clientId) {
-        throw new Error('No SoundCloud client ID is available.');
-    }
-
-    await play.setToken({ soundcloud: { client_id: clientId } });
-}
-
-function soundCloudQueries(title) {
-    const cleaned = title
-        .replace(/\s*[\[(][^\])]*(?:official|offisiell|lyrics?|lyrikk|music video)[^\])]*[\])]/gi, '')
-        .replace(/\b(?:official|offisiell|lyrics?|lyrikkvideo|music video|lyric video)\b/gi, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    const parts = cleaned.split(/\s[-–—]\s/);
-    const variants = [cleaned];
-
-    if (parts.length > 1) {
-        variants.push(parts.join(' '), [...parts].reverse().join(' '));
-    }
-
-    return [...new Set(variants.map((query) => query.trim()).filter(Boolean))];
-}
-
-async function getTrackStream(track) {
-    try {
-        return { audio: await play.stream(track.url), track };
-    } catch (error) {
-        if (track.source !== 'youtube' || !isYouTubeBotBlock(error)) throw error;
-
-        try {
-            await initializeSoundCloud();
-        } catch (fallbackError) {
-            throw new Error(`YouTube blocked this server and SoundCloud could not be initialized: ${fallbackError.message}`, {
-                cause: fallbackError
-            });
-        }
-
-        const triedUrls = new Set();
-        for (const query of soundCloudQueries(track.title)) {
-            let results;
-            try {
-                results = await play.search(query, {
-                    limit: 5,
-                    source: { soundcloud: 'tracks' }
-                });
-            } catch (searchError) {
-                console.warn(`SoundCloud search failed for "${query}": ${searchError.message}`);
-                continue;
-            }
-
-            for (const result of results) {
-                if (!result.permalink || triedUrls.has(result.permalink)) continue;
-                triedUrls.add(result.permalink);
-
-                try {
-                    return {
-                        audio: await play.stream(result.permalink),
-                        track: { ...track, title: result.name || track.title, source: 'fallback' }
-                    };
-                } catch (fallbackError) {
-                    console.warn(`SoundCloud fallback failed for "${result.name}": ${fallbackError.message}`);
-                }
-            }
-        }
-
-        throw new Error('YouTube blocked this server and SoundCloud had no matching playable track.');
-    }
 }
 
 async function streamTrack(state, track) {
@@ -152,12 +62,10 @@ async function streamTrack(state, track) {
         return;
     }
 
-    const playback = await getTrackStream(track);
-    const audio = playback.audio;
-    track.title = playback.track.title;
+    const audioStream = await getTrackStream(track.id);
     if (state.stopping || state.skipRequested) {
         state.skipRequested = false;
-        audio.stream.destroy();
+        audioStream.destroy();
         return;
     }
 
@@ -195,7 +103,7 @@ async function streamTrack(state, track) {
         };
 
         ffmpeg.on('error', finish);
-        audio.stream.on('error', (error) => {
+        audioStream.on('error', (error) => {
             ffmpeg.kill();
             finish(state.stopping || state.skipRequested ? null : error);
         });
@@ -241,7 +149,7 @@ async function streamTrack(state, track) {
         });
     });
 
-    audio.stream.pipe(ffmpeg.stdin);
+    audioStream.pipe(ffmpeg.stdin);
 
     try {
         await result;
@@ -328,9 +236,9 @@ function startQueue(serverId, state) {
     }
 }
 
-bot.command('play', 'Play a YouTube song or add it to the server queue', async (message) => {
+bot.command('play', 'Play a song or add it to the server queue', async (message) => {
     const query = message.args?.trim();
-    if (!query) return message.reply('Usage: `/play song name or YouTube URL`');
+    if (!query) return message.reply('Usage: `/play song name or track URL`');
     if (!message.server_id) return message.reply('Music playback is only available in a server.');
 
     try {
@@ -347,7 +255,7 @@ bot.command('play', 'Play a YouTube song or add it to the server queue', async (
             }
 
             const track = await resolveTrack(query);
-            if (!track) return message.reply('I could not find a matching YouTube track.');
+            if (!track) return message.reply('I could not find a matching playable track.');
 
             if (!state) {
                 state = {

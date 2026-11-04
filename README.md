@@ -28,8 +28,9 @@ The Yapin version is a separate deployment from the Discord bot:
 1. Create a **Node.js** deployment from `Brage321/MusicFRtest` on Bot-Hosting.net.
 2. Set the startup command to `npm run start:yapin`.
 3. Add `YAPPER_BOT_TOKEN` as a secret environment variable in the deployment settings. Do not put the token in source code or commit it.
-4. Start the deployment. The script installs the Yapin-specific dependencies and launches `Yapin/index.js`.
-5. Add the bot to your Yapin server and grant it permission to view voice channels and connect.
+4. Add `AUDIUS_API_KEY` as a secret environment variable. Create a read-only key in [Audius app settings](https://audius.co/settings).
+5. Start the deployment. The script installs the Yapin-specific dependencies and launches `Yapin/index.js`.
+6. Add the bot to your Yapin server and grant it permission to view voice channels and connect.
 
 Use the token from Yapin's Developer settings, and rotate it immediately if it has been shared or exposed. The existing `npm start` command still starts the Discord version.
 
@@ -130,7 +131,7 @@ Enjoy hosting Groove Music on Bot-Hosting.net! 💙
 
 ### Yapin bot (experimental)
 
-An initial Yapin music-bot port is available in [`Yapin/`](./Yapin/README.md). It supports YouTube playback and a per-server queue through Yapin's LiveKit voice API. See its setup guide; the existing Discord bot and its `npm start` command are unchanged.
+An initial Yapin music-bot port is available in [`Yapin/`](./Yapin/README.md). It searches and streams from the Audius catalog and supports a per-server queue through Yapin's LiveKit voice API. See its setup guide; the existing Discord bot and its `npm start` command are unchanged.
 
 ### Prerequisites
 
