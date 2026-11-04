@@ -81,39 +81,65 @@ async function initializeSoundCloud() {
     await play.setToken({ soundcloud: { client_id: clientId } });
 }
 
+function soundCloudQueries(title) {
+    const cleaned = title
+        .replace(/\s*[\[(][^\])]*(?:official|offisiell|lyrics?|lyrikk|music video)[^\])]*[\])]/gi, '')
+        .replace(/\b(?:official|offisiell|lyrics?|lyrikkvideo|music video|lyric video)\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const parts = cleaned.split(/\s[-–—]\s/);
+    const variants = [cleaned];
+
+    if (parts.length > 1) {
+        variants.push(parts.join(' '), [...parts].reverse().join(' '));
+    }
+
+    return [...new Set(variants.map((query) => query.trim()).filter(Boolean))];
+}
+
 async function getTrackStream(track) {
     try {
         return { audio: await play.stream(track.url), track };
     } catch (error) {
         if (track.source !== 'youtube' || !isYouTubeBotBlock(error)) throw error;
 
-        let results;
         try {
             await initializeSoundCloud();
-            results = await play.search(track.title, {
-                limit: 5,
-                source: { soundcloud: 'tracks' }
-            });
         } catch (fallbackError) {
-            throw new Error(`YouTube blocked this server and SoundCloud search failed: ${fallbackError.message}`, {
+            throw new Error(`YouTube blocked this server and SoundCloud could not be initialized: ${fallbackError.message}`, {
                 cause: fallbackError
             });
         }
 
-        for (const result of results) {
-            if (!result.permalink) continue;
-
+        const triedUrls = new Set();
+        for (const query of soundCloudQueries(track.title)) {
+            let results;
             try {
-                return {
-                    audio: await play.stream(result.permalink),
-                    track: { ...track, title: result.name || track.title, source: 'SoundCloud' }
-                };
-            } catch (fallbackError) {
-                console.warn(`SoundCloud fallback failed for "${result.name}": ${fallbackError.message}`);
+                results = await play.search(query, {
+                    limit: 5,
+                    source: { soundcloud: 'tracks' }
+                });
+            } catch (searchError) {
+                console.warn(`SoundCloud search failed for "${query}": ${searchError.message}`);
+                continue;
+            }
+
+            for (const result of results) {
+                if (!result.permalink || triedUrls.has(result.permalink)) continue;
+                triedUrls.add(result.permalink);
+
+                try {
+                    return {
+                        audio: await play.stream(result.permalink),
+                        track: { ...track, title: result.name || track.title, source: 'SoundCloud' }
+                    };
+                } catch (fallbackError) {
+                    console.warn(`SoundCloud fallback failed for "${result.name}": ${fallbackError.message}`);
+                }
             }
         }
 
-        throw new Error('YouTube blocked this server and no matching SoundCloud track could be played.');
+        throw new Error('YouTube blocked this server and SoundCloud had no matching playable track.');
     }
 }
 
