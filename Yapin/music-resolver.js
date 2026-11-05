@@ -242,6 +242,16 @@ export async function resolveMusicInput(query) {
         return { tracks: track ? [track] : [], unavailable: 0, collectionName: '', source: 'Audius', truncated: false };
     }
 
+    let youtubeMatches = [];
+    if (process.env.YOUTUBE_API_KEY) {
+        const youtube = await resolveYouTube(trimmed);
+        youtubeMatches = youtube.tracks;
+        const mapped = await mapFirstPlayable(youtubeMatches, trimmed);
+        if (mapped.tracks.length) {
+            return { ...mapped, collectionName: '', source: 'YouTube', truncated: false };
+        }
+    }
+
     const search = splitTitleAndArtist(trimmed);
     const results = await searchTracks(trimmed);
     const track = results.find((candidate) => matches(candidate, search));
@@ -278,7 +288,8 @@ export async function resolveMusicInput(query) {
             collectionName: '',
             source: 'Audius',
             truncated: false,
-            needsArtist: !search.artist
+            needsArtist: !search.artist && youtubeMatches.length === 0,
+            youtubeMatches
         };
     }
     return {

@@ -323,7 +323,12 @@ bot.command('play', 'Play a song or add it to the server queue', async (message)
 
             const result = await resolveMusicInput(query);
             if (!result.tracks.length) {
-                const reason = result.needsArtist
+                const youtubeChoices = result.youtubeMatches?.slice(0, 3)
+                    .map((video) => `[${video.title} — ${video.artist}](${video.url})`)
+                    .join('\n');
+                const reason = youtubeChoices
+                    ? `I found these YouTube matches, but no authorized audio version is available to play in voice. I won't relay YouTube audio or play an unverified cover/remix:\n${youtubeChoices}`
+                    : result.needsArtist
                     ? 'I could not verify the artist for that title-only search. Try `/play Blinding Lights - The Weeknd` or provide a Spotify/YouTube link.'
                     : result.unavailable
                     ? `${result.unavailable} item(s) had no verified playable match in the supported audio catalog.`
