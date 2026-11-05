@@ -1,6 +1,26 @@
 import { Readable } from 'node:stream';
 
 const API_BASE = 'https://api.audius.co/v1';
+const STREAM_RESPONSE_TIMEOUT_MS = 30_000;
+
+async function fetchStreamResponse(url, options) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+        controller.abort(new DOMException('The audio source timed out before responding.', 'TimeoutError'));
+    }, STREAM_RESPONSE_TIMEOUT_MS);
+    timeout.unref?.();
+
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } catch (error) {
+        if (controller.signal.aborted) {
+            throw new Error('Audius audio source timed out before playback could start.');
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
 
 function headers() {
     const result = {};
@@ -60,10 +80,9 @@ export async function resolveTrackUrl(url) {
 }
 
 export async function getTrackStream(trackId) {
-    const response = await fetch(`${API_BASE}/tracks/${encodeURIComponent(trackId)}/stream`, {
+    const response = await fetchStreamResponse(`${API_BASE}/tracks/${encodeURIComponent(trackId)}/stream`, {
         headers: headers(),
-        redirect: 'manual',
-        signal: AbortSignal.timeout(30_000)
+        redirect: 'manual'
     });
 
     let streamResponse = response;
@@ -79,9 +98,7 @@ export async function getTrackStream(trackId) {
             throw new Error('Audius returned an unsupported audio stream URL.');
         }
 
-        streamResponse = await fetch(streamUrl, {
-            signal: AbortSignal.timeout(30_000)
-        });
+        streamResponse = await fetchStreamResponse(streamUrl);
     }
 
     if (!streamResponse.ok || !streamResponse.body) {

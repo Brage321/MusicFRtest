@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { getTrackStream } from '../audius.js';
+import { getEmbedArtwork } from '../embed-artwork.js';
 import { resolveMusicInput } from '../music-resolver.js';
 
 const originalFetch = globalThis.fetch;
@@ -34,6 +36,64 @@ test.after(() => {
     for (const [key, value] of Object.entries(originalEnvironment)) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
+    }
+});
+
+test('only uses image hosts accepted by Yapin embeds', () => {
+    assert.equal(getEmbedArtwork('https://media.tenor.com/cover.jpg'), 'https://media.tenor.com/cover.jpg');
+    assert.equal(getEmbedArtwork('https://cdn.audius.co/cover.jpg'), null);
+    assert.equal(getEmbedArtwork('https://i.scdn.co/image/cover'), null);
+    assert.equal(getEmbedArtwork('http://i.imgur.com/cover.jpg'), null);
+    assert.equal(getEmbedArtwork('not a URL'), null);
+});
+
+test('stream response timeout is cleared after headers so full-length audio stays connected', async () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    const previousFetch = globalThis.fetch;
+    const timeoutHandle = { unref() {} };
+    let timeoutScheduled = false;
+    let timeoutCleared = false;
+    let streamSignal;
+
+    globalThis.setTimeout = (callback, delay, ...args) => {
+        if (delay === 30_000) {
+            timeoutScheduled = true;
+            return timeoutHandle;
+        }
+        return originalSetTimeout(callback, delay, ...args);
+    };
+    globalThis.clearTimeout = (handle) => {
+        if (handle === timeoutHandle) timeoutCleared = true;
+        else originalClearTimeout(handle);
+    };
+    globalThis.fetch = async (input, options = {}) => {
+        if (String(input).includes('/stream')) {
+            return new Response(null, {
+                status: 302,
+                headers: { location: 'https://cdn.audius.test/audio' }
+            });
+        }
+        streamSignal = options.signal;
+        return new Response(new ReadableStream({
+            start(controller) {
+                controller.enqueue(new Uint8Array([1, 2, 3]));
+            }
+        }));
+    };
+
+    try {
+        const stream = await getTrackStream('test-track');
+        const chunk = await stream[Symbol.asyncIterator]().next();
+        assert.deepEqual([...chunk.value], [1, 2, 3]);
+        assert.equal(timeoutScheduled, true);
+        assert.equal(timeoutCleared, true);
+        assert.equal(streamSignal.aborted, false);
+        stream.destroy();
+    } finally {
+        globalThis.fetch = previousFetch;
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
     }
 });
 

@@ -5,6 +5,7 @@ import { Bot, Embed } from './yapper.js';
 import * as rtc from '@livekit/rtc-node';
 import ffmpegPath from 'ffmpeg-static';
 import { getTrackStream } from './audius.js';
+import { getEmbedArtwork } from './embed-artwork.js';
 import { resolveMusicInput } from './music-resolver.js';
 
 const token = process.env.YAPPER_BOT_TOKEN;
@@ -94,7 +95,8 @@ async function streamTrack(state, track) {
             .title(track.title)
             .description(`**Artist:** ${track.artist || 'Unknown'}\n**Album:** ${track.album || 'Unknown'}\n**Progress:** 0:00 / ${formatDuration(track.duration)}\n**Requested by:** ${track.requestedBy || 'Unknown'}\n**Volume:** ${state.volume}%`)
             .color('#5865f2');
-        if (track.artwork) embed.thumbnail(track.artwork);
+        const artwork = getEmbedArtwork(track.artwork);
+        if (artwork) embed.thumbnail(artwork);
         bot.send(state.textChannelId, `🎵 Now playing: **${displayTitle(track)}**`, { embeds: [embed] })
             .catch((error) => console.error('Could not announce playback:', error));
     });
@@ -360,7 +362,8 @@ bot.command('nowplaying', 'Show the current track and playback progress', async 
         .title(track.title)
         .description(`**Artist:** ${track.artist || 'Unknown'}\n**Album:** ${track.album || 'Unknown'}\n**Progress:** ${progress}${state.paused ? ' (paused)' : ''}\n**Requested by:** ${track.requestedBy || 'Unknown'}\n**Volume:** ${state.volume}%`)
         .color('#5865f2');
-    if (track.artwork) embed.thumbnail(track.artwork);
+    const artwork = getEmbedArtwork(track.artwork);
+    if (artwork) embed.thumbnail(artwork);
     await message.reply('', { embeds: [embed] });
 });
 
