@@ -97,6 +97,50 @@ test('uses YouTube metadata to resolve title-only searches without Spotify crede
     assert.ok(calls.some((url) => url.pathname.endsWith('/tracks/search')));
 });
 
+test('queues a title-only YouTube metadata match when an authorized audio source has it', async () => {
+    process.env.YOUTUBE_API_KEY = 'test-youtube-key';
+    delete process.env.SPOTIFY_CLIENT_ID;
+    delete process.env.SPOTIFY_CLIENT_SECRET;
+    delete process.env.JAMENDO_CLIENT_ID;
+    delete process.env.FREETOUSE_PLAYBACK_AUTHORIZED;
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        if (url.hostname === 'www.googleapis.com' && url.pathname.endsWith('/search')) {
+            return jsonResponse({
+                items: [{ id: { videoId: 'official-video' } }]
+            });
+        }
+        if (url.hostname === 'www.googleapis.com' && url.pathname.endsWith('/videos')) {
+            return jsonResponse({
+                items: [{
+                    id: 'official-video',
+                    snippet: {
+                        title: 'Blinding Lights',
+                        channelTitle: 'The Weeknd',
+                        thumbnails: {}
+                    },
+                    contentDetails: { duration: 'PT3M20S' },
+                    status: { privacyStatus: 'public', embeddable: true }
+                }]
+            });
+        }
+        if (url.hostname === 'api.audius.co') {
+            return jsonResponse(setAudiusResults([
+                { title: 'Blinding Lights', artist: 'The Weeknd', license: 'Attribution CC BY' }
+            ]));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await resolveMusicInput('Blinding Lights');
+
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].title, 'Blinding Lights');
+    assert.equal(result.tracks[0].artist, 'The Weeknd');
+    assert.equal(result.tracks[0].provider, 'audius');
+    assert.equal(result.tracks[0].licenseName, 'CC BY');
+});
+
 test('only uses image hosts accepted by Yapin embeds', () => {
     assert.equal(getEmbedArtwork('https://media.tenor.com/cover.jpg'), 'https://media.tenor.com/cover.jpg');
     assert.equal(getEmbedArtwork('https://cdn.audius.co/cover.jpg'), null);
