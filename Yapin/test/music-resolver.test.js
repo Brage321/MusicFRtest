@@ -212,6 +212,61 @@ test('resolves Spotify track URLs to verified Audius playback metadata', async (
     assert.ok(calls.some((url) => url.includes('/v1/tracks/1234567890')));
 });
 
+test('uses Spotify track metadata to find Jamendo audio when Audius has no match', async () => {
+    process.env.SPOTIFY_CLIENT_ID = 'test-client';
+    process.env.SPOTIFY_CLIENT_SECRET = 'test-secret';
+    process.env.JAMENDO_CLIENT_ID = 'test-jamendo-id';
+    const calls = [];
+    globalThis.fetch = async (input, options = {}) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.includes('accounts.spotify.com')) {
+            return jsonResponse({ access_token: 'test-token', expires_in: 3600 });
+        }
+        if (url.includes('api.spotify.com/v1/tracks/')) {
+            return jsonResponse({
+                name: 'Blinding Lights',
+                artists: [{ name: 'The Weeknd' }],
+                album: { name: 'After Hours', images: [] },
+                duration_ms: 200000,
+                external_urls: { spotify: 'https://open.spotify.com/track/1234567890' }
+            });
+        }
+        if (url.includes('api.audius.co')) {
+            return jsonResponse({ data: [] });
+        }
+        if (url.includes('api.jamendo.com/v3.0/tracks/')) {
+            const search = new URL(url).searchParams;
+            assert.equal(search.get('search'), 'The Weeknd Blinding Lights');
+            return jsonResponse({
+                headers: { status: 'success', error_message: '' },
+                results: [{
+                    id: 'jamendo-123',
+                    name: 'Blinding Lights',
+                    artist_name: 'The Weeknd',
+                    album_name: 'Cover album',
+                    duration: 200,
+                    audio: 'https://api.jamendo.com/audio/jamendo-123.mp3',
+                    shareurl: 'https://www.jamendo.com/track/jamendo-123',
+                    license_ccurl: 'https://creativecommons.org/licenses/by/4.0/'
+                }]
+            });
+        }
+        throw new Error(`Unexpected request: ${options.method || 'GET'} ${url}`);
+    };
+
+    const result = await resolveMusicInput('https://open.spotify.com/track/1234567890');
+    assert.equal(result.source, 'Spotify');
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].provider, 'jamendo');
+    assert.equal(result.tracks[0].title, 'Blinding Lights');
+    assert.equal(result.tracks[0].artist, 'The Weeknd');
+    assert.equal(result.tracks[0].streamUrl, 'https://api.jamendo.com/audio/jamendo-123.mp3');
+    assert.equal(calls.some((url) => url.includes('spotify') && url.includes('audio')), false);
+    assert.ok(calls.some((url) => url.includes('api.spotify.com/v1/tracks/1234567890')));
+    assert.ok(calls.some((url) => url.includes('api.jamendo.com/v3.0/tracks/')));
+});
+
 test('resolves Spotify track URIs without treating the URI as audio', async () => {
     process.env.SPOTIFY_CLIENT_ID = 'test-client';
     process.env.SPOTIFY_CLIENT_SECRET = 'test-secret';
