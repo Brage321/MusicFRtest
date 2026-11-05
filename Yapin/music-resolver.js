@@ -131,6 +131,21 @@ async function mapFirstPlayable(tracks, query) {
     return { tracks: [], unavailable: tracks.length ? 1 : 0 };
 }
 
+async function mapSpotifyWithYouTubeFallback(tracks, query) {
+    const fallbackQuery = query === undefined
+        ? [tracks[0]?.artist, tracks[0]?.title].filter(Boolean).join(' ')
+        : query;
+    if (process.env.YOUTUBE_API_KEY && fallbackQuery) {
+        const youtube = await resolveYouTube(fallbackQuery);
+        const fallback = youtube.type === 'search'
+            ? await mapFirstPlayable(youtube.tracks, fallbackQuery)
+            : await mapToPlayable(youtube.tracks);
+        if (fallback.tracks.length) return { ...fallback, source: 'YouTube' };
+    }
+
+    return { ...(await mapToPlayable(tracks)), source: 'Spotify' };
+}
+
 function splitTitleAndArtist(query) {
     const parts = query.split(/\s+-\s+/);
     if (parts.length < 2) return { title: query, artist: '' };
@@ -172,8 +187,11 @@ export async function resolveMusicInput(query) {
 
     if (isSpotifyUrl(trimmed) || spotifySearch) {
         const result = await resolveSpotify(spotifySearch?.[1] || trimmed);
-        const mapped = await mapToPlayable(result.tracks);
-        return { ...mapped, collectionName: result.name || '', source: 'Spotify', truncated: result.truncated || false };
+        const query = result.type === 'track' || result.type === 'search'
+            ? spotifySearch?.[1] || [result.tracks[0]?.artist, result.tracks[0]?.title].filter(Boolean).join(' ')
+            : '';
+        const mapped = await mapSpotifyWithYouTubeFallback(result.tracks, query);
+        return { ...mapped, collectionName: result.name || '', truncated: result.truncated || false };
     }
 
     if (isYouTubeUrl(trimmed) || youtubeSearch) {
@@ -187,9 +205,9 @@ export async function resolveMusicInput(query) {
 
     if (process.env.SPOTIFY_CLIENT_ID || process.env.SPOTIFY_CLIENT_SECRET) {
         const result = await resolveSpotify(trimmed);
-        if (result.tracks.length) {
-            const mapped = await mapToPlayable(result.tracks);
-            return { ...mapped, collectionName: '', source: 'Spotify', truncated: false };
+        const mapped = await mapSpotifyWithYouTubeFallback(result.tracks, trimmed);
+        if (mapped.tracks.length) {
+            return { ...mapped, collectionName: '', truncated: false };
         }
     }
 

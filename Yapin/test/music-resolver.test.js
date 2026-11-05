@@ -42,9 +42,10 @@ test.after(() => {
 });
 
 test.afterEach(() => {
-    const value = originalEnvironment.JAMENDO_CLIENT_ID;
-    if (value === undefined) delete process.env.JAMENDO_CLIENT_ID;
-    else process.env.JAMENDO_CLIENT_ID = value;
+    for (const [key, value] of Object.entries(originalEnvironment)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+    }
 });
 
 test('only uses image hosts accepted by Yapin embeds', () => {
@@ -212,10 +213,11 @@ test('resolves Spotify track URLs to verified Audius playback metadata', async (
     assert.ok(calls.some((url) => url.includes('/v1/tracks/1234567890')));
 });
 
-test('uses Spotify track metadata to find Jamendo audio when Audius has no match', async () => {
+test('tries YouTube metadata after Spotify before resolving audio from Jamendo', async () => {
     process.env.SPOTIFY_CLIENT_ID = 'test-client';
     process.env.SPOTIFY_CLIENT_SECRET = 'test-secret';
     process.env.JAMENDO_CLIENT_ID = 'test-jamendo-id';
+    process.env.YOUTUBE_API_KEY = 'test-youtube-key';
     const calls = [];
     globalThis.fetch = async (input, options = {}) => {
         const url = String(input);
@@ -237,14 +239,16 @@ test('uses Spotify track metadata to find Jamendo audio when Audius has no match
         }
         if (url.includes('api.jamendo.com/v3.0/tracks/')) {
             const search = new URL(url).searchParams;
-            assert.equal(search.get('search'), 'The Weeknd Blinding Lights');
+            if (search.get('search') === 'The Weeknd Blinding Lights') {
+                return jsonResponse({ headers: { status: 'success' }, results: [] });
+            }
             return jsonResponse({
                 headers: { status: 'success', error_message: '' },
                 results: [{
                     id: 'jamendo-123',
                     name: 'Blinding Lights',
                     artist_name: 'The Weeknd',
-                    album_name: 'Cover album',
+                    album_name: 'Album',
                     duration: 200,
                     audio: 'https://api.jamendo.com/audio/jamendo-123.mp3',
                     shareurl: 'https://www.jamendo.com/track/jamendo-123',
@@ -252,19 +256,41 @@ test('uses Spotify track metadata to find Jamendo audio when Audius has no match
                 }]
             });
         }
+        if (url.includes('www.googleapis.com/youtube/v3/search')) {
+            return jsonResponse({ items: [{ id: { videoId: 'youtube-video-1' } }] });
+        }
+        if (url.includes('www.googleapis.com/youtube/v3/videos')) {
+            return jsonResponse({
+                items: [{
+                    id: 'youtube-video-1',
+                    snippet: {
+                        title: 'Blinding Lights (Official Audio)',
+                        channelTitle: 'The Weeknd',
+                        thumbnails: {}
+                    },
+                    contentDetails: { duration: 'PT3M20S' },
+                    status: { privacyStatus: 'public', embeddable: true }
+                }]
+            });
+        }
         throw new Error(`Unexpected request: ${options.method || 'GET'} ${url}`);
     };
 
     const result = await resolveMusicInput('https://open.spotify.com/track/1234567890');
-    assert.equal(result.source, 'Spotify');
+    assert.equal(result.source, 'YouTube');
     assert.equal(result.tracks.length, 1);
     assert.equal(result.tracks[0].provider, 'jamendo');
     assert.equal(result.tracks[0].title, 'Blinding Lights');
     assert.equal(result.tracks[0].artist, 'The Weeknd');
     assert.equal(result.tracks[0].streamUrl, 'https://api.jamendo.com/audio/jamendo-123.mp3');
     assert.equal(calls.some((url) => url.includes('spotify') && url.includes('audio')), false);
-    assert.ok(calls.some((url) => url.includes('api.spotify.com/v1/tracks/1234567890')));
-    assert.ok(calls.some((url) => url.includes('api.jamendo.com/v3.0/tracks/')));
+    const spotifyIndex = calls.findIndex((url) => url.includes('api.spotify.com/v1/tracks/1234567890'));
+    const youtubeIndex = calls.findIndex((url) => url.includes('youtube/v3/search'));
+    const resolvedJamendoIndex = calls.findIndex((url) => url.includes('api.jamendo.com/v3.0/tracks/')
+        && new URL(url).searchParams.get('search') !== 'The Weeknd Blinding Lights');
+    assert.ok(spotifyIndex >= 0);
+    assert.ok(youtubeIndex > spotifyIndex);
+    assert.ok(resolvedJamendoIndex > youtubeIndex);
 });
 
 test('resolves Spotify track URIs without treating the URI as audio', async () => {
@@ -450,6 +476,7 @@ test('searches multiple YouTube results but adds only the verified match', async
 });
 
 test('reads YouTube playlist metadata and queues only matching audio', async () => {
+    process.env.YOUTUBE_API_KEY = 'test-youtube-key';
     globalThis.fetch = async (input) => {
         const url = new URL(String(input));
         if (url.pathname.endsWith('/playlists')) {
