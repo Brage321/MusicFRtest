@@ -370,7 +370,10 @@ bot.command('play', 'Play a song or add it to the server queue', async (message)
                     : result.unavailable
                     ? `${result.unavailable} item(s) had no verified playable match in the supported audio catalog.`
                     : 'No matching playable track was found.';
-                return message.reply(`I could not add that request. ${reason} Linked audio is not relayed directly.`);
+                const watchHint = process.env.YOUTUBE_API_KEY
+                    ? ` Try \`/watch ${query}\` to find the YouTube music video and open it there.`
+                    : '';
+                return message.reply(`I could not add that request. ${reason} Linked audio is not relayed directly.${watchHint}`);
             }
 
             if (!state) {
@@ -401,6 +404,28 @@ bot.command('play', 'Play a song or add it to the server queue', async (message)
     } catch (error) {
         console.error('Yapin play command failed:', error);
         await message.reply(`Could not add that song: ${playbackErrorMessage(error)}`);
+    }
+});
+
+bot.command('watch', 'Find YouTube videos to open and watch', async (message) => {
+    const query = message.args?.trim();
+    if (!query) return message.reply('Usage: `/watch song name - artist`');
+    if (!process.env.YOUTUBE_API_KEY) {
+        return message.reply('YouTube search is not configured. Set `YOUTUBE_API_KEY` to enable `/watch`.');
+    }
+
+    try {
+        const result = await resolveYouTube(query);
+        const videos = result.tracks.slice(0, 5);
+        if (!videos.length) return message.reply('No public YouTube videos were found for that search.');
+
+        const choices = videos
+            .map((video, index) => `${index + 1}. [${video.title} — ${video.artist}](${video.url})`)
+            .join('\n');
+        await message.reply(`🎬 **YouTube results** (open a link to watch; this does not play in voice):\n${choices}`);
+    } catch (error) {
+        console.error('Yapin YouTube video search failed:', error);
+        await message.reply(`Could not search YouTube: ${playbackErrorMessage(error)}`);
     }
 });
 
