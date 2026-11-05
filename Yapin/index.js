@@ -365,7 +365,9 @@ bot.command('play', 'Play a song or add it to the server queue', async (message)
 
             const result = await resolveMusicInput(query);
             if (!result.tracks.length) {
-                const reason = result.unavailable
+                const reason = result.needsArtist
+                    ? 'I could not verify the artist for that title-only search. Try `/play Blinding Lights - The Weeknd` or provide a Spotify/YouTube link.'
+                    : result.unavailable
                     ? `${result.unavailable} item(s) had no verified playable match in the supported audio catalog.`
                     : 'No matching playable track was found.';
                 return message.reply(`I could not add that request. ${reason} Linked audio is not relayed directly.`);

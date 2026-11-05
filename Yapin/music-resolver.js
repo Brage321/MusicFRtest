@@ -84,7 +84,7 @@ function matches(candidate, metadata) {
     if (!expectedTitle || titleScore < 0.9) return false;
 
     const expectedArtist = normalize(metadata.artist);
-    if (!expectedArtist) return titleScore >= 0.95;
+    if (!expectedArtist) return false;
     return tokenSimilarity(expectedArtist, candidateArtist) >= 0.5;
 }
 
@@ -268,7 +268,14 @@ export async function resolveMusicInput(query) {
                 };
             }
         }
-        return { tracks: [], unavailable: results.length ? 1 : 0, collectionName: '', source: 'Audius', truncated: false };
+        return {
+            tracks: [],
+            unavailable: results.length ? 1 : 0,
+            collectionName: '',
+            source: 'Audius',
+            truncated: false,
+            needsArtist: !search.artist
+        };
     }
     return {
         tracks: [mapDirectAudiusTrack(track)],

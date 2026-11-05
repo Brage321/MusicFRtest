@@ -449,8 +449,13 @@ test('maps Spotify playlist entries and reports tracks without a close match', a
 });
 
 test('searches Spotify and resolves an album to its Audius matches', async () => {
+    process.env.SPOTIFY_CLIENT_ID = 'test-client';
+    process.env.SPOTIFY_CLIENT_SECRET = 'test-secret';
     globalThis.fetch = async (input) => {
         const url = String(input);
+        if (url.includes('accounts.spotify.com')) {
+            return jsonResponse({ access_token: 'test-token', expires_in: 3600 });
+        }
         if (url.includes('api.spotify.com/v1/search')) {
             return jsonResponse({
                 tracks: {
@@ -492,6 +497,46 @@ test('searches Spotify and resolves an album to its Audius matches', async () =>
     assert.equal(album.collectionName, 'After Hours');
     assert.equal(album.tracks.length, 1);
     assert.equal(album.tracks[0].artwork, 'https://images.example.test/cover.jpg');
+});
+
+test('does not treat a same-title Audius upload as the requested artist', async () => {
+    delete process.env.SPOTIFY_CLIENT_ID;
+    delete process.env.SPOTIFY_CLIENT_SECRET;
+    delete process.env.JAMENDO_CLIENT_ID;
+    delete process.env.FREETOUSE_PLAYBACK_AUTHORIZED;
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        if (url.hostname === 'api.audius.co') {
+            return jsonResponse(setAudiusResults([{ title: 'Blinding Lights', artist: 'XX PHATZ' }]));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const titleOnly = await resolveMusicInput('Blinding Lights');
+    assert.equal(titleOnly.tracks.length, 0);
+    assert.equal(titleOnly.needsArtist, true);
+
+    const requestedArtist = await resolveMusicInput('Blinding Lights - The Weeknd');
+    assert.equal(requestedArtist.tracks.length, 0);
+    assert.equal(requestedArtist.needsArtist, false);
+});
+
+test('plays the requested artist when the title and artist both match', async () => {
+    delete process.env.SPOTIFY_CLIENT_ID;
+    delete process.env.SPOTIFY_CLIENT_SECRET;
+    delete process.env.JAMENDO_CLIENT_ID;
+    delete process.env.FREETOUSE_PLAYBACK_AUTHORIZED;
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        if (url.hostname === 'api.audius.co') {
+            return jsonResponse(setAudiusResults([{ title: 'Blinding Lights', artist: 'The Weeknd' }]));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await resolveMusicInput('Blinding Lights - The Weeknd');
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].artist, 'The Weeknd');
 });
 
 test('uses YouTube metadata but only queues an exact artist/title Audius match', async () => {
