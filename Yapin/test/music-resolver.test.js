@@ -29,6 +29,8 @@ function setAudiusResults(items) {
             title: item.title,
             duration: item.duration || 200,
             is_streamable: true,
+            license: Object.hasOwn(item, 'license') ? item.license : 'Attribution CC BY',
+            permalink: `/test/track-${index}`,
             user: { name: item.artist },
             artwork: { '480x480': 'https://images.example.test/cover.jpg' }
         }))
@@ -112,6 +114,17 @@ test('does not queue Jamendo tracks with licenses that do not allow redistributi
     assert.equal(result.tracks.length, 0);
 });
 
+test('preserves the declared CC BY-SA license when resolving an Audius track', async () => {
+    globalThis.fetch = async () => jsonResponse(setAudiusResults([
+        { title: 'Song', artist: 'Artist', license: 'Attribution-ShareAlike CC BY-SA' }
+    ]));
+
+    const result = await resolveMusicInput('Song - Artist');
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].provider, 'audius');
+    assert.equal(result.tracks[0].licenseName, 'CC BY-SA');
+});
+
 test('streams Jamendo audio as a Node stream for the existing LiveKit pipeline', async () => {
     const previousFetch = globalThis.fetch;
     globalThis.fetch = async (input, options) => {
@@ -123,7 +136,8 @@ test('streams Jamendo audio as a Node stream for the existing LiveKit pipeline',
     try {
         const stream = await getJamendoTrackStream({
             provider: 'jamendo',
-            streamUrl: 'https://api.jamendo.com/audio/123.mp3'
+            streamUrl: 'https://api.jamendo.com/audio/123.mp3',
+            license: 'https://creativecommons.org/licenses/by/4.0/'
         });
         assert.equal(typeof stream.pipe, 'function');
         const chunk = await stream[Symbol.asyncIterator]().next();
@@ -207,6 +221,8 @@ test('does not use Free To Use tracks unless playback authorization is enabled',
 
 test('streams Free To Use MP3 audio as a Node stream for the existing LiveKit pipeline', async () => {
     const previousFetch = globalThis.fetch;
+    const previousAuthorization = process.env.FREETOUSE_PLAYBACK_AUTHORIZED;
+    process.env.FREETOUSE_PLAYBACK_AUTHORIZED = 'true';
     globalThis.fetch = async (input, options) => {
         assert.equal(String(input), 'https://eu.data.freetouse.com/file.mp3');
         assert.equal(options.redirect, 'manual');
@@ -216,13 +232,16 @@ test('streams Free To Use MP3 audio as a Node stream for the existing LiveKit pi
     try {
         const stream = await getFreeToUseTrackStream({
             provider: 'freetouse',
-            streamUrl: 'https://eu.data.freetouse.com/file.mp3'
+            streamUrl: 'https://eu.data.freetouse.com/file.mp3',
+            license: 'Free To Use License'
         });
         assert.equal(typeof stream.pipe, 'function');
         const chunk = await stream[Symbol.asyncIterator]().next();
         assert.deepEqual([...chunk.value], [1, 2, 3]);
     } finally {
         globalThis.fetch = previousFetch;
+        if (previousAuthorization === undefined) delete process.env.FREETOUSE_PLAYBACK_AUTHORIZED;
+        else process.env.FREETOUSE_PLAYBACK_AUTHORIZED = previousAuthorization;
     }
 });
 
@@ -262,7 +281,11 @@ test('stream response timeout is cleared after headers so full-length audio stay
     };
 
     try {
-        const stream = await getTrackStream('test-track');
+        const stream = await getTrackStream({
+            id: 'test-track',
+            provider: 'audius',
+            license: 'Attribution CC BY'
+        });
         const chunk = await stream[Symbol.asyncIterator]().next();
         assert.deepEqual([...chunk.value], [1, 2, 3]);
         assert.equal(timeoutScheduled, true);
@@ -274,6 +297,26 @@ test('stream response timeout is cleared after headers so full-length audio stay
         globalThis.setTimeout = originalSetTimeout;
         globalThis.clearTimeout = originalClearTimeout;
     }
+});
+
+test('does not resolve Audius tracks without an approved explicit redistribution license', async () => {
+    delete process.env.JAMENDO_CLIENT_ID;
+    delete process.env.FREETOUSE_PLAYBACK_AUTHORIZED;
+    globalThis.fetch = async () => jsonResponse(setAudiusResults([
+        { title: 'Song', artist: 'Artist', license: 'All rights reserved' },
+        { title: 'Other Song', artist: 'Artist', license: null },
+        { title: 'No Derivatives', artist: 'Artist', license: 'Attribution-NoDerivs CC BY-ND' }
+    ]));
+
+    const result = await resolveMusicInput('Song - Artist');
+    assert.equal(result.tracks.length, 0);
+});
+
+test('requires explicit CC BY or CC BY-SA licensing before Audius streaming', async () => {
+    await assert.rejects(
+        getTrackStream({ id: 'test-track', provider: 'audius', license: 'All rights reserved' }),
+        /explicit CC BY or CC BY-SA license/
+    );
 });
 
 test('resolves Spotify track URLs to verified Audius playback metadata', async () => {

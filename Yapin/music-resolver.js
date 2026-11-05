@@ -106,13 +106,17 @@ async function findPlayableTrack(metadata) {
     }
 
     return {
+        provider: 'audius',
         id: match.id,
         title: metadata.title,
         artist: metadata.artist || match.artist,
         album: metadata.album || '',
         artwork: metadata.artwork || '',
         duration: metadata.duration || match.duration || 0,
-        sourceUrl: metadata.url || ''
+        sourceUrl: metadata.url || '',
+        url: match.url,
+        license: match.license,
+        licenseName: match.licenseName
     };
 }
 

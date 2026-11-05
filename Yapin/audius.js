@@ -3,6 +3,11 @@ import { Readable } from 'node:stream';
 const API_BASE = 'https://api.audius.co/v1';
 const STREAM_RESPONSE_TIMEOUT_MS = 30_000;
 const SEARCH_RESULT_LIMIT = 100;
+const AUDIO_LICENSES = new Map([
+    ['Attribution CC BY', { name: 'CC BY' }],
+    ['Attribution ShareAlike CC BY-SA', { name: 'CC BY-SA' }],
+    ['Attribution-ShareAlike CC BY-SA', { name: 'CC BY-SA' }]
+]);
 
 async function fetchStreamResponse(url, options) {
     const controller = new AbortController();
@@ -45,19 +50,32 @@ async function apiRequest(path) {
 }
 
 function toTrack(item) {
-    if (!item || typeof item.id !== 'string' || typeof item.title !== 'string') {
+    if (!item || typeof item.id !== 'string' || typeof item.title !== 'string' || !item.title.trim()) {
+        return null;
+    }
+    const artist = item.user?.name || item.artist;
+    const audioLicense = AUDIO_LICENSES.get(item.license);
+    if (!audioLicense
+        || item.is_streamable === false
+        || typeof artist !== 'string'
+        || !artist.trim()
+        || typeof item.permalink !== 'string'
+        || !item.permalink.startsWith('/')) {
         return null;
     }
 
     return {
         id: item.id,
+        provider: 'audius',
         title: item.title,
-        artist: item.user?.name || item.artist || '',
+        artist,
         album: '',
         artwork: item.artwork?.['480x480'] || item.artwork?.['150x150'] || item.artwork?.['1000x1000'] || '',
         duration: Number(item.duration) || 0,
         url: item.permalink ? `https://audius.co${item.permalink}` : '',
-        streamable: item.is_streamable !== false
+        license: item.license,
+        licenseName: audioLicense.name,
+        streamable: true
     };
 }
 
@@ -80,8 +98,12 @@ export async function resolveTrackUrl(url) {
     return track?.streamable ? track : null;
 }
 
-export async function getTrackStream(trackId) {
-    const response = await fetchStreamResponse(`${API_BASE}/tracks/${encodeURIComponent(trackId)}/stream`, {
+export async function getTrackStream(track) {
+    if (track?.provider !== 'audius' || !AUDIO_LICENSES.has(track.license) || !track.id) {
+        throw new Error('Audius playback requires a track with an explicit CC BY or CC BY-SA license.');
+    }
+
+    const response = await fetchStreamResponse(`${API_BASE}/tracks/${encodeURIComponent(track.id)}/stream`, {
         headers: headers(),
         redirect: 'manual'
     });

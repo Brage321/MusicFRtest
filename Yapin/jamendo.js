@@ -14,6 +14,10 @@ function isJamendoUrl(value) {
         && (url.hostname === 'jamendo.com' || url.hostname.endsWith('.jamendo.com'));
 }
 
+function isRedistributableLicense(value) {
+    return /^https:\/\/creativecommons\.org\/licenses\/by(?:-sa)?\/(?:1\.0|2\.0|2\.5|3\.0|4\.0)\/?$/i.test(value || '');
+}
+
 async function fetchStreamResponse(url, options = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => {
@@ -30,7 +34,7 @@ async function fetchStreamResponse(url, options = {}) {
 
 function toTrack(item) {
     if (!item || typeof item.id !== 'string' || typeof item.name !== 'string') return null;
-    if (!isJamendoUrl(item.audio) || !/^https?:\/\/creativecommons\.org\/licenses\/by(?:-sa)?\//i.test(item.license_ccurl || '')) {
+    if (!isJamendoUrl(item.audio) || !isRedistributableLicense(item.license_ccurl)) {
         return null;
     }
     if (!isJamendoUrl(item.shareurl)) return null;
@@ -83,7 +87,9 @@ export async function searchJamendoTracks(query) {
 }
 
 export async function getJamendoTrackStream(track) {
-    if (track?.provider !== 'jamendo' || !isJamendoUrl(track.streamUrl)) {
+    if (track?.provider !== 'jamendo'
+        || !isJamendoUrl(track.streamUrl)
+        || !isRedistributableLicense(track.license)) {
         throw new Error('Jamendo returned an unsupported audio stream URL.');
     }
 

@@ -1,12 +1,9 @@
 import 'dotenv/config';
-import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { Bot, Embed } from './yapper.js';
 import * as rtc from '@livekit/rtc-node';
-import ffmpegPath from 'ffmpeg-static';
-import { getTrackStream } from './audius.js';
-import { getFreeToUseTrackStream } from './freetouse.js';
-import { getJamendoTrackStream } from './jamendo.js';
+import { getAudioSourceStream } from './audio-sources.js';
+import { assertFfmpegAvailable, createPcmDecoder } from './audio-processing.js';
+import { createVoiceFramePublisher } from './yapin-voice.js';
 import { getEmbedArtwork } from './embed-artwork.js';
 import { resolveMusicInput } from './music-resolver.js';
 import { connectQueueStore } from './queue-store.js';
@@ -16,16 +13,12 @@ if (!token) {
     throw new Error('Set YAPPER_BOT_TOKEN in your environment or .env file.');
 }
 
+assertFfmpegAvailable();
+
 const bot = new Bot(token);
 const servers = new Map();
 const playLocks = new Map();
 const queueStore = await connectQueueStore();
-const ffmpegExecutable = process.env.FFMPEG_PATH
-    || (ffmpegPath && existsSync(ffmpegPath) ? ffmpegPath : 'ffmpeg');
-const SAMPLE_RATE = 48_000;
-const CHANNELS = 2;
-const FRAME_SAMPLES = 480;
-const FRAME_BYTES = FRAME_SAMPLES * CHANNELS * 2;
 
 function createServerState({ voiceChannelId, textChannelId, queue = [] }) {
     return {
@@ -104,6 +97,9 @@ function displayTitle(track) {
 }
 
 function sourceAttribution(track) {
+    if (track.provider === 'audius' && track.url && track.licenseName) {
+        return `\n**Track:** [${track.artist || 'Audius'} - ${track.title}](${track.url}) · ${track.licenseName} (as declared on Audius)`;
+    }
     if (track.provider === 'jamendo' && track.url && track.license) {
         return `\n**Track:** [Jamendo](${track.url}) · [CC license](${track.license})`;
     }
@@ -135,30 +131,14 @@ async function streamTrack(state, track) {
         return false;
     }
 
-    const audioStream = track.provider === 'jamendo'
-        ? await getJamendoTrackStream(track)
-        : track.provider === 'freetouse'
-            ? await getFreeToUseTrackStream(track)
-            : await getTrackStream(track.id);
+    const audioStream = await getAudioSourceStream(track);
     if (state.stopping || state.skipRequested) {
         state.skipRequested = false;
         audioStream.destroy();
         return false;
     }
 
-    const ffmpeg = spawn(ffmpegExecutable, [
-        '-hide_banner',
-        '-loglevel', 'error',
-        '-nostdin',
-        '-re',
-        '-i', 'pipe:0',
-        '-vn',
-        '-f', 's16le',
-        '-acodec', 'pcm_s16le',
-        '-ar', String(SAMPLE_RATE),
-        '-ac', String(CHANNELS),
-        'pipe:1'
-    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const ffmpeg = createPcmDecoder();
 
     state.currentProcess = ffmpeg;
     state.startedAt = Date.now();
@@ -175,8 +155,10 @@ async function streamTrack(state, track) {
         bot.send(state.textChannelId, `🎵 Now playing: **${displayTitle(track)}**`, { embeds: [embed] })
             .catch((error) => console.error('Could not announce playback:', error));
     });
-    let remaining = Buffer.alloc(0);
-    let frameWrites = Promise.resolve();
+    const voicePublisher = createVoiceFramePublisher(state.call, rtc, {
+        getVolume: () => state.volume,
+        shouldStop: () => state.stopping || state.skipRequested
+    });
     let settled = false;
     let completedNaturally = false;
 
@@ -198,37 +180,14 @@ async function streamTrack(state, track) {
         });
 
         ffmpeg.stdout.on('data', (chunk) => {
-            remaining = Buffer.concat([remaining, chunk]);
-            const frames = [];
-            while (remaining.length >= FRAME_BYTES) {
-                frames.push(remaining.subarray(0, FRAME_BYTES));
-                remaining = remaining.subarray(FRAME_BYTES);
-            }
-
-            frameWrites = frameWrites.then(async () => {
-                for (const frame of frames) {
-                    if (state.stopping || state.skipRequested) break;
-                    const pcm = new Int16Array(
-                        frame.buffer.slice(frame.byteOffset, frame.byteOffset + FRAME_BYTES)
-                    );
-                    if (state.volume !== 100) {
-                        const gain = state.volume / 100;
-                        for (let index = 0; index < pcm.length; index += 1) {
-                            pcm[index] = Math.max(-32768, Math.min(32767, Math.round(pcm[index] * gain)));
-                        }
-                    }
-                    await state.call.source.captureFrame(
-                        new rtc.AudioFrame(pcm, SAMPLE_RATE, CHANNELS, FRAME_SAMPLES)
-                    );
-                }
-            }).catch((error) => {
+            voicePublisher.write(chunk).catch((error) => {
                 ffmpeg.kill();
                 finish(state.stopping || state.skipRequested ? null : error);
             });
         });
 
         ffmpeg.on('close', (code) => {
-            frameWrites.then(() => {
+            voicePublisher.flush().then(() => {
                 if (state.stopping || state.skipRequested) {
                     state.skipRequested = false;
                     finish();
@@ -241,7 +200,6 @@ async function streamTrack(state, track) {
             }, finish);
         });
     });
-
     if (state.paused) ffmpeg.stdout.pause();
     audioStream.pipe(ffmpeg.stdin);
 

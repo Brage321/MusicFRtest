@@ -79,7 +79,12 @@ export async function searchFreeToUseTracks(query) {
 }
 
 export async function getFreeToUseTrackStream(track) {
-    if (track?.provider !== 'freetouse' || !isFreeToUseUrl(track.streamUrl)) {
+    if (process.env.FREETOUSE_PLAYBACK_AUTHORIZED !== 'true') {
+        throw new Error('Free To Use playback is disabled until authorization for Yapin voice playback is confirmed.');
+    }
+    if (track?.provider !== 'freetouse'
+        || track.license !== 'Free To Use License'
+        || !isFreeToUseUrl(track.streamUrl)) {
         throw new Error('Free To Use returned an unsupported audio stream URL.');
     }
 
