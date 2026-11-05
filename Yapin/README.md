@@ -15,7 +15,7 @@ For Bot-Hosting.net, set the startup command to `npm run start:yapin` and add `Y
 
 ### Music lookup and playback sources
 
-The bot uses Spotify and YouTube for metadata only. It never streams or downloads audio from either service. Spotify tracks, albums, and playlists, and YouTube videos and playlists, are matched against streamable Audius tracks before being queued. A playlist is limited to 50 entries; items without a sufficiently close title and artist match are skipped. Audius links and searches remain supported.
+The bot uses Spotify and YouTube for metadata only. It never streams or downloads audio from either service. Spotify tracks, albums, and playlists, and YouTube videos and playlists, are matched against streamable Audius tracks before being queued. Plain-text searches also require a close title and artist match; titles marked as remixes, edits, instrumentals, covers, bootlegs, or similar versions are skipped. A playlist is limited to 50 entries; items without a sufficiently close title and artist match are skipped. Audius links and searches remain supported. Audius is user-uploaded, so metadata matching cannot guarantee that an upload is an official master recording; an exact original that is not available in Audius will not play.
 
 Set the following as secret environment variables when using each service:
 

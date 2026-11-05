@@ -17,9 +17,47 @@ function tokenSimilarity(left, right) {
     const a = new Set(left.split(/\s+/).filter(Boolean));
     const b = new Set(right.split(/\s+/).filter(Boolean));
     if (!a.size || !b.size) return 0;
+    const remaining = new Set(b);
     let shared = 0;
-    for (const token of a) if (b.has(token)) shared += 1;
+    for (const token of a) {
+        const match = [...remaining]
+            .filter((candidate) => candidate === token || (Math.min(token.length, candidate.length) >= 5
+                && editDistanceAtMostOne(token, candidate)))
+            .sort((left, right) => left.length - right.length)[0];
+        if (match) {
+            shared += 1;
+            remaining.delete(match);
+        }
+    }
     return (2 * shared) / (a.size + b.size);
+}
+
+function editDistanceAtMostOne(left, right) {
+    if (Math.abs(left.length - right.length) > 1) return false;
+    let leftIndex = 0;
+    let rightIndex = 0;
+    let edits = 0;
+    while (leftIndex < left.length && rightIndex < right.length) {
+        if (left[leftIndex] === right[rightIndex]) {
+            leftIndex += 1;
+            rightIndex += 1;
+            continue;
+        }
+        edits += 1;
+        if (edits > 1) return false;
+        if (left.length > right.length) leftIndex += 1;
+        else if (right.length > left.length) rightIndex += 1;
+        else {
+            leftIndex += 1;
+            rightIndex += 1;
+        }
+    }
+    return edits + Number(leftIndex < left.length || rightIndex < right.length) <= 1;
+}
+
+function isAlternateVersion(candidate) {
+    const title = normalize(candidate.title);
+    return /\b(remix|edit|bootleg|instrumental|cover|karaoke|nightcore|mashup|rework|tribute|sped up|slowed|speed up|slowed down)\b/.test(title);
 }
 
 function queryMatches(metadata, query) {
@@ -32,6 +70,8 @@ function queryMatches(metadata, query) {
 }
 
 function matches(candidate, metadata) {
+    if (isAlternateVersion(candidate)) return false;
+
     const expectedTitle = normalize(metadata.title);
     const candidateArtist = normalize(candidate.artist);
     let candidateTitle = normalize(candidate.title);
@@ -86,6 +126,26 @@ async function mapFirstPlayable(tracks, query) {
     return { tracks: [], unavailable: tracks.length ? 1 : 0 };
 }
 
+function splitTitleAndArtist(query) {
+    const parts = query.split(/\s+-\s+/);
+    if (parts.length < 2) return { title: query, artist: '' };
+    return {
+        title: parts.slice(0, -1).join(' - ').trim(),
+        artist: parts.at(-1).trim()
+    };
+}
+
+function mapDirectAudiusTrack(track) {
+    return {
+        ...track,
+        title: track.title,
+        artist: track.artist,
+        album: track.album || '',
+        artwork: track.artwork || '',
+        duration: track.duration || 0
+    };
+}
+
 export async function resolveMusicInput(query) {
     const trimmed = query.trim();
     const spotifySearch = trimmed.match(/^(?:spotify|sp):\s+(.+)$/i);
@@ -119,18 +179,12 @@ export async function resolveMusicInput(query) {
         return { tracks: track ? [track] : [], unavailable: 0, collectionName: '', source: 'Audius', truncated: false };
     }
 
+    const search = splitTitleAndArtist(trimmed);
     const results = await searchTracks(trimmed);
-    const track = results[0];
-    if (!track) return { tracks: [], unavailable: 0, collectionName: '', source: 'Audius', truncated: false };
+    const track = results.find((candidate) => matches(candidate, search));
+    if (!track) return { tracks: [], unavailable: results.length ? 1 : 0, collectionName: '', source: 'Audius', truncated: false };
     return {
-        tracks: [{
-            ...track,
-            title: track.title,
-            artist: track.artist,
-            album: '',
-            artwork: track.artwork || '',
-            duration: track.duration || 0
-        }],
+        tracks: [mapDirectAudiusTrack(track)],
         unavailable: 0,
         collectionName: '',
         source: 'Audius',

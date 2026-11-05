@@ -367,3 +367,42 @@ test('does not queue a different version of the requested song', async () => {
     assert.equal(result.tracks.length, 0);
     assert.equal(result.unavailable, 1);
 });
+
+test('does not play a remix returned first for a plain song search', async () => {
+    process.env.SPOTIFY_CLIENT_ID = '';
+    process.env.SPOTIFY_CLIENT_SECRET = '';
+    globalThis.fetch = async (input) => {
+        assert.ok(String(input).includes('/tracks/search'));
+        return jsonResponse(setAudiusResults([{
+            title: "Kanye West x KRANE - Can't Tell Me To Feel Nothing (Stevo Edit)",
+            artist: 'Stevo'
+        }]));
+    };
+
+    const result = await resolveMusicInput("Can't Tell Me Nothin - kanye west");
+    assert.equal(result.tracks.length, 0);
+    assert.equal(result.unavailable, 1);
+});
+
+test('skips a remix and selects the matching artist and original title', async () => {
+    process.env.SPOTIFY_CLIENT_ID = '';
+    process.env.SPOTIFY_CLIENT_SECRET = '';
+    globalThis.fetch = async (input) => {
+        assert.ok(String(input).includes('/tracks/search'));
+        return jsonResponse(setAudiusResults([
+            {
+                title: "Kanye West x KRANE - Can't Tell Me To Feel Nothing (Stevo Edit)",
+                artist: 'Stevo'
+            },
+            {
+                title: "Can't Tell Me Nothing",
+                artist: 'Kanye West'
+            }
+        ]));
+    };
+
+    const result = await resolveMusicInput("Can't Tell Me Nothin - kanye west");
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].artist, 'Kanye West');
+    assert.equal(result.tracks[0].title, "Can't Tell Me Nothing");
+});
