@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { getTrackStream } from '../audius.js';
 import { getFreeToUseTrackStream } from '../freetouse.js';
 import { getJamendoTrackStream } from '../jamendo.js';
+import { searchAppleMusic } from '../apple-music.js';
 import { getEmbedArtwork } from '../embed-artwork.js';
 import { resolveMusicInput } from '../music-resolver.js';
 
@@ -52,6 +53,63 @@ test.afterEach(() => {
     }
 });
 
+test('finds The Weeknd original on Apple Music for title-only searches', async () => {
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        assert.equal(url.hostname, 'itunes.apple.com');
+        assert.equal(url.searchParams.get('term'), 'Blinding Lights');
+        return jsonResponse({
+            results: [
+                {
+                    trackName: 'Blinding Lights (Remix)',
+                    artistName: 'The Weeknd',
+                    trackViewUrl: 'https://music.apple.com/track/remix'
+                },
+                {
+                    trackName: 'Blinding Lights',
+                    artistName: 'The Weeknd',
+                    collectionName: 'After Hours',
+                    trackTimeMillis: 200046,
+                    artworkUrl100: 'https://images.example.test/cover.jpg',
+                    trackViewUrl: 'https://music.apple.com/track/original'
+                }
+            ]
+        });
+    };
+
+    const results = await searchAppleMusic('Blinding Lights');
+    assert.equal(results.length, 2);
+    assert.equal(results[1].artist, 'The Weeknd');
+    assert.equal(results[1].duration, 200);
+});
+
+test('returns the Apple Music listing when no authorized full-track audio match exists', async () => {
+    delete process.env.YOUTUBE_API_KEY;
+    delete process.env.SPOTIFY_CLIENT_ID;
+    delete process.env.SPOTIFY_CLIENT_SECRET;
+    delete process.env.JAMENDO_CLIENT_ID;
+    delete process.env.FREETOUSE_PLAYBACK_AUTHORIZED;
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        if (url.hostname === 'api.audius.co') return jsonResponse({ data: [] });
+        if (url.hostname === 'itunes.apple.com') {
+            return jsonResponse({
+                results: [{
+                    trackName: 'Blinding Lights',
+                    artistName: 'The Weeknd',
+                    trackViewUrl: 'https://music.apple.com/track/original'
+                }]
+            });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await resolveMusicInput('Blinding Lights');
+    assert.equal(result.tracks.length, 0);
+    assert.equal(result.appleMusicMatches.length, 1);
+    assert.equal(result.appleMusicMatches[0].url, 'https://music.apple.com/track/original');
+});
+
 test('uses YouTube metadata to resolve title-only searches without Spotify credentials', async () => {
     process.env.YOUTUBE_API_KEY = 'test-youtube-key';
     delete process.env.SPOTIFY_CLIENT_ID;
@@ -83,6 +141,9 @@ test('uses YouTube metadata to resolve title-only searches without Spotify crede
         }
         if (url.hostname === 'api.audius.co') {
             return jsonResponse({ data: [] });
+        }
+        if (url.hostname === 'itunes.apple.com') {
+            return jsonResponse({ results: [] });
         }
         throw new Error(`Unexpected request: ${url}`);
     };
@@ -391,11 +452,16 @@ test('stream response timeout is cleared after headers so full-length audio stay
 test('does not resolve Audius tracks without an approved explicit redistribution license', async () => {
     delete process.env.JAMENDO_CLIENT_ID;
     delete process.env.FREETOUSE_PLAYBACK_AUTHORIZED;
-    globalThis.fetch = async () => jsonResponse(setAudiusResults([
-        { title: 'Song', artist: 'Artist', license: 'All rights reserved' },
-        { title: 'Other Song', artist: 'Artist', license: null },
-        { title: 'No Derivatives', artist: 'Artist', license: 'Attribution-NoDerivs CC BY-ND' }
-    ]));
+    globalThis.fetch = async (input) => {
+        if (new URL(String(input)).hostname === 'itunes.apple.com') {
+            return jsonResponse({ results: [] });
+        }
+        return jsonResponse(setAudiusResults([
+            { title: 'Song', artist: 'Artist', license: 'All rights reserved' },
+            { title: 'Other Song', artist: 'Artist', license: null },
+            { title: 'No Derivatives', artist: 'Artist', license: 'Attribution-NoDerivs CC BY-ND' }
+        ]));
+    };
 
     const result = await resolveMusicInput('Song - Artist');
     assert.equal(result.tracks.length, 0);
@@ -638,6 +704,7 @@ test('does not treat a same-title Audius upload as the requested artist', async 
     delete process.env.FREETOUSE_PLAYBACK_AUTHORIZED;
     globalThis.fetch = async (input) => {
         const url = new URL(String(input));
+        if (url.hostname === 'itunes.apple.com') return jsonResponse({ results: [] });
         if (url.hostname === 'api.audius.co') {
             return jsonResponse(setAudiusResults([{ title: 'Blinding Lights', artist: 'XX PHATZ' }]));
         }
@@ -833,6 +900,9 @@ test('does not play a remix returned first for a plain song search', async () =>
     process.env.SPOTIFY_CLIENT_ID = '';
     process.env.SPOTIFY_CLIENT_SECRET = '';
     globalThis.fetch = async (input) => {
+        if (new URL(String(input)).hostname === 'itunes.apple.com') {
+            return jsonResponse({ results: [] });
+        }
         assert.ok(String(input).includes('/tracks/search'));
         return jsonResponse(setAudiusResults([{
             title: "Kanye West x KRANE - Can't Tell Me To Feel Nothing (Stevo Edit)",

@@ -1,4 +1,5 @@
 import { searchTracks, resolveTrackUrl } from './audius.js';
+import { searchAppleMusic } from './apple-music.js';
 import { searchFreeToUseTracks } from './freetouse.js';
 import { searchJamendoTracks } from './jamendo.js';
 import { isSpotifyUrl, resolveSpotify } from './spotify.js';
@@ -86,6 +87,12 @@ function matches(candidate, metadata) {
     const expectedArtist = normalize(metadata.artist);
     if (!expectedArtist) return false;
     return tokenSimilarity(expectedArtist, candidateArtist) >= 0.5;
+}
+
+function matchesAppleMusicResult(candidate, requested) {
+    if (isAlternateVersion(candidate)) return false;
+    if (requested.artist) return matches(candidate, requested);
+    return tokenSimilarity(normalize(requested.title), normalize(candidate.title)) >= 0.9;
 }
 
 async function findPlayableTrack(metadata) {
@@ -282,6 +289,14 @@ export async function resolveMusicInput(query) {
                 };
             }
         }
+        const appleResults = await searchAppleMusic(trimmed);
+        const appleMatches = appleResults.filter((candidate) => matchesAppleMusicResult(candidate, search));
+        if (appleMatches.length) {
+            const mapped = await mapFirstPlayable(appleMatches, trimmed);
+            if (mapped.tracks.length) {
+                return { ...mapped, collectionName: '', source: 'Apple Music', truncated: false };
+            }
+        }
         return {
             tracks: [],
             unavailable: results.length ? 1 : 0,
@@ -289,7 +304,8 @@ export async function resolveMusicInput(query) {
             source: 'Audius',
             truncated: false,
             needsArtist: !search.artist && youtubeMatches.length === 0,
-            youtubeMatches
+            youtubeMatches,
+            appleMusicMatches: appleMatches
         };
     }
     return {

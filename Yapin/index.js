@@ -326,17 +326,21 @@ bot.command('play', 'Play a song or add it to the server queue', async (message)
                 const youtubeChoices = result.youtubeMatches?.slice(0, 3)
                     .map((video) => `[${video.title} — ${video.artist}](${video.url})`)
                     .join('\n');
-                const reason = youtubeChoices
-                    ? `I found these YouTube matches, but no authorized audio version is available to play in voice. I won't relay YouTube audio or play an unverified cover/remix:\n${youtubeChoices}`
+                const appleChoices = result.appleMusicMatches?.slice(0, 3)
+                    .map((track) => `[${track.artist} — ${track.title}](${track.url})`)
+                    .join('\n');
+                const choices = [
+                    youtubeChoices && `**YouTube:**\n${youtubeChoices}`,
+                    appleChoices && `**Apple Music:**\n${appleChoices}`
+                ].filter(Boolean).join('\n');
+                const reason = choices
+                    ? `I found the song, but no authorized full-track audio source is available for voice playback. Open it on a music service, or use one of these results:\n${choices}`
                     : result.needsArtist
                     ? 'I could not verify the artist for that title-only search. Try `/play Blinding Lights - The Weeknd` or provide a Spotify/YouTube link.'
                     : result.unavailable
                     ? `${result.unavailable} item(s) had no verified playable match in the supported audio catalog.`
                     : 'No matching playable track was found.';
-                const watchHint = process.env.YOUTUBE_API_KEY
-                    ? ` Try \`/watch ${query}\` to find the YouTube music video and open it there.`
-                    : '';
-                return message.reply(`I could not add that request. ${reason} Linked audio is not relayed directly.${watchHint}`);
+                return message.reply(`I could not add that request. ${reason}`);
             }
 
             if (!state) {
