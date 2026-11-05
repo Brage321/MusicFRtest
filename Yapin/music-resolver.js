@@ -1,4 +1,5 @@
 import { searchTracks, resolveTrackUrl } from './audius.js';
+import { searchFreeToUseTracks } from './freetouse.js';
 import { searchJamendoTracks } from './jamendo.js';
 import { isSpotifyUrl, resolveSpotify } from './spotify.js';
 import { isYouTubeUrl, resolveYouTube } from './youtube.js';
@@ -92,9 +93,16 @@ async function findPlayableTrack(metadata) {
     const candidates = await searchTracks(query);
     const match = candidates.find((candidate) => matches(candidate, metadata));
     if (!match) {
-        if (!process.env.JAMENDO_CLIENT_ID) return null;
-        const jamendoCandidates = await searchJamendoTracks(query);
-        return jamendoCandidates.find((candidate) => matches(candidate, metadata)) || null;
+        if (process.env.JAMENDO_CLIENT_ID) {
+            const jamendoCandidates = await searchJamendoTracks(query);
+            const jamendoMatch = jamendoCandidates.find((candidate) => matches(candidate, metadata));
+            if (jamendoMatch) return jamendoMatch;
+        }
+        if (process.env.FREETOUSE_PLAYBACK_AUTHORIZED === 'true') {
+            const freeToUseCandidates = await searchFreeToUseTracks(query);
+            return freeToUseCandidates.find((candidate) => matches(candidate, metadata)) || null;
+        }
+        return null;
     }
 
     return {
@@ -168,9 +176,23 @@ function mapDirectAudiusTrack(track) {
 
 export async function resolveMusicInput(query) {
     const trimmed = query.trim();
+    const freeToUseSearch = trimmed.match(/^(?:freetouse|ftu):\s*(.+)$/i);
     const jamendoSearch = trimmed.match(/^jamendo:\s*(.+)$/i);
     const spotifySearch = trimmed.match(/^(?:spotify|sp):\s+(.+)$/i);
     const youtubeSearch = trimmed.match(/^(?:youtube|yt):\s+(.+)$/i);
+
+    if (freeToUseSearch) {
+        const requested = splitTitleAndArtist(freeToUseSearch[1]);
+        const tracks = await searchFreeToUseTracks(freeToUseSearch[1]);
+        const match = tracks.find((candidate) => matches(candidate, requested));
+        return {
+            tracks: match ? [match] : [],
+            unavailable: tracks.length && !match ? 1 : 0,
+            collectionName: '',
+            source: 'Free To Use',
+            truncated: false
+        };
+    }
 
     if (jamendoSearch) {
         const requested = splitTitleAndArtist(jamendoSearch[1]);
@@ -229,6 +251,19 @@ export async function resolveMusicInput(query) {
                     unavailable: 0,
                     collectionName: '',
                     source: 'Jamendo',
+                    truncated: false
+                };
+            }
+        }
+        if (process.env.FREETOUSE_PLAYBACK_AUTHORIZED === 'true') {
+            const freeToUseTracks = await searchFreeToUseTracks(trimmed);
+            const freeToUseTrack = freeToUseTracks.find((candidate) => matches(candidate, search));
+            if (freeToUseTrack) {
+                return {
+                    tracks: [freeToUseTrack],
+                    unavailable: 0,
+                    collectionName: '',
+                    source: 'Free To Use',
                     truncated: false
                 };
             }

@@ -5,6 +5,7 @@ import { Bot, Embed } from './yapper.js';
 import * as rtc from '@livekit/rtc-node';
 import ffmpegPath from 'ffmpeg-static';
 import { getTrackStream } from './audius.js';
+import { getFreeToUseTrackStream } from './freetouse.js';
 import { getJamendoTrackStream } from './jamendo.js';
 import { getEmbedArtwork } from './embed-artwork.js';
 import { resolveMusicInput } from './music-resolver.js';
@@ -103,8 +104,13 @@ function displayTitle(track) {
 }
 
 function sourceAttribution(track) {
-    if (track.provider !== 'jamendo' || !track.url || !track.license) return '';
-    return `\n**Track:** [Jamendo](${track.url}) · [CC license](${track.license})`;
+    if (track.provider === 'jamendo' && track.url && track.license) {
+        return `\n**Track:** [Jamendo](${track.url}) · [CC license](${track.license})`;
+    }
+    if (track.provider === 'freetouse' && track.url) {
+        return `\n**Music:** [${track.artist ? `${track.title} by ${track.artist}` : track.title}](${track.url}) · Free To Use`;
+    }
+    return '';
 }
 
 function formatDuration(seconds) {
@@ -131,7 +137,9 @@ async function streamTrack(state, track) {
 
     const audioStream = track.provider === 'jamendo'
         ? await getJamendoTrackStream(track)
-        : await getTrackStream(track.id);
+        : track.provider === 'freetouse'
+            ? await getFreeToUseTrackStream(track)
+            : await getTrackStream(track.id);
     if (state.stopping || state.skipRequested) {
         state.skipRequested = false;
         audioStream.destroy();
@@ -339,7 +347,7 @@ function startQueue(serverId, state) {
 
 bot.command('play', 'Play a song or add it to the server queue', async (message) => {
     const query = message.args?.trim();
-    if (!query) return message.reply('Usage: `/play song name, Spotify link, YouTube link, Audius link, or jamendo: search terms`');
+    if (!query) return message.reply('Usage: `/play song name, Spotify link, YouTube link, Audius link, jamendo: search terms, or freetouse: search terms`');
     if (!message.server_id) return message.reply('Music playback is only available in a server.');
 
     try {

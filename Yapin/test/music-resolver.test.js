@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getTrackStream } from '../audius.js';
+import { getFreeToUseTrackStream } from '../freetouse.js';
 import { getJamendoTrackStream } from '../jamendo.js';
 import { getEmbedArtwork } from '../embed-artwork.js';
 import { resolveMusicInput } from '../music-resolver.js';
@@ -10,7 +11,8 @@ const originalEnvironment = {
     SPOTIFY_CLIENT_ID: process.env.SPOTIFY_CLIENT_ID,
     SPOTIFY_CLIENT_SECRET: process.env.SPOTIFY_CLIENT_SECRET,
     YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
-    JAMENDO_CLIENT_ID: process.env.JAMENDO_CLIENT_ID
+    JAMENDO_CLIENT_ID: process.env.JAMENDO_CLIENT_ID,
+    FREETOUSE_PLAYBACK_AUTHORIZED: process.env.FREETOUSE_PLAYBACK_AUTHORIZED
 };
 
 function jsonResponse(data, status = 200) {
@@ -122,6 +124,99 @@ test('streams Jamendo audio as a Node stream for the existing LiveKit pipeline',
         const stream = await getJamendoTrackStream({
             provider: 'jamendo',
             streamUrl: 'https://api.jamendo.com/audio/123.mp3'
+        });
+        assert.equal(typeof stream.pipe, 'function');
+        const chunk = await stream[Symbol.asyncIterator]().next();
+        assert.deepEqual([...chunk.value], [1, 2, 3]);
+    } finally {
+        globalThis.fetch = previousFetch;
+    }
+});
+
+test('searches and resolves a directly playable Free To Use track when authorized', async () => {
+    process.env.FREETOUSE_PLAYBACK_AUTHORIZED = 'true';
+    delete process.env.JAMENDO_CLIENT_ID;
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        if (url.hostname === 'api.audius.co') return jsonResponse({ data: [] });
+        assert.equal(url.hostname, 'api.freetouse.com');
+        assert.equal(url.pathname, '/v3/music/tracks/search');
+        assert.equal(url.searchParams.get('query'), 'Aura Power - Walen');
+        return jsonResponse({
+            ok: true,
+            data: [
+                {
+                    id: 'premium-track',
+                    title: 'Aura Power',
+                    is_premium: true,
+                    files: { mp3: 'https://eu.data.freetouse.com/premium.mp3' }
+                },
+                {
+                    id: '0682f6e1-da4d-42bf-910f-6e70e2b8b375',
+                    title: 'Aura Power',
+                    duration: 113,
+                    is_premium: false,
+                    artists: [[0, { name: 'Walen' }]],
+                    thumbnails: { md: 'https://eu.data.freetouse.com/cover.webp' },
+                    files: { mp3: 'https://eu.data.freetouse.com/file.mp3' }
+                }
+            ]
+        });
+    };
+
+    const result = await resolveMusicInput('freetouse: Aura Power - Walen');
+    assert.equal(result.source, 'Free To Use');
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].provider, 'freetouse');
+    assert.equal(result.tracks[0].streamUrl, 'https://eu.data.freetouse.com/file.mp3');
+});
+
+test('uses Free To Use as a fallback after Audius has no close match', async () => {
+    process.env.FREETOUSE_PLAYBACK_AUTHORIZED = 'true';
+    delete process.env.JAMENDO_CLIENT_ID;
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        if (url.hostname === 'api.audius.co') return jsonResponse({ data: [] });
+        assert.equal(url.hostname, 'api.freetouse.com');
+        return jsonResponse({
+            ok: true,
+            data: [{
+                id: '0682f6e1-da4d-42bf-910f-6e70e2b8b375',
+                title: 'Aura Power',
+                duration: 113,
+                is_premium: false,
+                artists: [[0, { name: 'Walen' }]],
+                files: { mp3: 'https://eu.data.freetouse.com/file.mp3' }
+            }]
+        });
+    };
+
+    const result = await resolveMusicInput('Aura Power - Walen');
+    assert.equal(result.source, 'Free To Use');
+    assert.equal(result.tracks[0].provider, 'freetouse');
+});
+
+test('does not use Free To Use tracks unless playback authorization is enabled', async () => {
+    delete process.env.FREETOUSE_PLAYBACK_AUTHORIZED;
+    globalThis.fetch = async () => {
+        throw new Error('Free To Use must not be queried without authorization.');
+    };
+
+    await assert.rejects(resolveMusicInput('freetouse: Aura Power - Walen'), /FREETOUSE_PLAYBACK_AUTHORIZED=true/);
+});
+
+test('streams Free To Use MP3 audio as a Node stream for the existing LiveKit pipeline', async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async (input, options) => {
+        assert.equal(String(input), 'https://eu.data.freetouse.com/file.mp3');
+        assert.equal(options.redirect, 'manual');
+        return new Response(new Uint8Array([1, 2, 3]));
+    };
+
+    try {
+        const stream = await getFreeToUseTrackStream({
+            provider: 'freetouse',
+            streamUrl: 'https://eu.data.freetouse.com/file.mp3'
         });
         assert.equal(typeof stream.pipe, 'function');
         const chunk = await stream[Symbol.asyncIterator]().next();
