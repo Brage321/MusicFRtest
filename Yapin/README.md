@@ -23,8 +23,10 @@ Set the following as secret environment variables when using each service:
 - `AUDIUS_API_KEY` — optional Audius API key; recommended for API access.
 - `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` — optional Spotify app credentials for Spotify search and links.
 - `YOUTUBE_API_KEY` — optional Google API key with YouTube Data API v3 enabled for YouTube search and links.
+- `MONGODB_URI` — optional MongoDB connection string for saved queues; without it, queues remain in memory only.
+- `MONGODB_DATABASE` — optional MongoDB database name (defaults to `musicfr`).
 
-The bot needs permission to view voice channels and connect. Each Yapin server has an independent in-memory queue and one voice connection, and queues are not persisted across restarts. Multiple users can add tracks to the same server queue, but users must be in the same voice channel as the active session.
+The bot needs permission to view voice channels and connect. Each Yapin server has an independent queue and one voice connection. When `MONGODB_URI` is configured, the current track, upcoming tracks, loop mode, volume, and channel IDs are saved in MongoDB. After a restart, playback resumes from the interrupted track and continues with the saved queue. Without MongoDB configured, queue state is held in memory and is lost on restart. Use a single running bot instance for a given Yapin app to avoid two processes restoring and playing the same saved queues. Multiple users can add tracks to the same server queue, but users must be in the same voice channel as the active session.
 
 Available commands: `/play`, `/pause`, `/resume`, `/skip`, `/stop`, `/queue`, `/nowplaying`, `/volume 0-100`, `/clearqueue`, `/remove position`, `/loop off|song|queue`, and `/shuffle`. You can search Spotify by default when its credentials are configured, or use `spotify: song name` and `youtube: song name` to select a metadata search explicitly. YouTube full-audio playback is not supported by its documented APIs; a YouTube result is queued only if a verified playable Audius match exists. This does not grant additional rights to redistribute a track, so ensure the relevant track and service terms permit your use.
 

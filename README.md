@@ -31,8 +31,9 @@ The Yapin version is a separate deployment from the Discord bot:
 4. Add `AUDIUS_API_KEY` as a secret environment variable. Create a read-only key in [Audius app settings](https://audius.co/settings).
 5. To enable Spotify metadata lookup, add `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` from a Spotify developer app as secret variables.
 6. To enable YouTube metadata lookup, add `YOUTUBE_API_KEY` from a Google Cloud project with YouTube Data API v3 enabled.
-7. Start the deployment. The script installs the Yapin-specific dependencies and launches `Yapin/index.js`.
-8. Add the bot to your Yapin server and grant it permission to view voice channels and connect.
+7. Optionally add `MONGODB_URI` as a secret to persist Yapin queues across restarts. `MONGODB_DATABASE` optionally changes the default database name `musicfr`.
+8. Start the deployment. The script installs the Yapin-specific dependencies and launches `Yapin/index.js`.
+9. Add the bot to your Yapin server and grant it permission to view voice channels and connect.
 
 Spotify and YouTube are used for search and metadata only, not for audio streaming. Their results are queued only when a matching streamable Audius track is found. See [`Yapin/README.md`](./Yapin/README.md) for source and command limitations.
 

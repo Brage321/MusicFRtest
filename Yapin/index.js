@@ -7,6 +7,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { getTrackStream } from './audius.js';
 import { getEmbedArtwork } from './embed-artwork.js';
 import { resolveMusicInput } from './music-resolver.js';
+import { connectQueueStore } from './queue-store.js';
 
 const token = process.env.YAPPER_BOT_TOKEN;
 if (!token) {
@@ -16,12 +17,70 @@ if (!token) {
 const bot = new Bot(token);
 const servers = new Map();
 const playLocks = new Map();
+const queueStore = await connectQueueStore();
 const ffmpegExecutable = process.env.FFMPEG_PATH
     || (ffmpegPath && existsSync(ffmpegPath) ? ffmpegPath : 'ffmpeg');
 const SAMPLE_RATE = 48_000;
 const CHANNELS = 2;
 const FRAME_SAMPLES = 480;
 const FRAME_BYTES = FRAME_SAMPLES * CHANNELS * 2;
+
+function createServerState({ voiceChannelId, textChannelId, queue = [] }) {
+    return {
+        voiceChannelId,
+        textChannelId,
+        queue,
+        current: null,
+        currentProcess: null,
+        call: null,
+        worker: null,
+        stopping: false,
+        skipRequested: false,
+        loopMode: 'off',
+        volume: 100,
+        paused: false,
+        startedAt: 0,
+        pausedAt: null,
+        pausedDuration: 0,
+        persistenceWarningSent: false
+    };
+}
+
+async function persistState(serverId, state) {
+    if (!queueStore) return true;
+
+    try {
+        await queueStore.save(serverId, state);
+        state.persistenceWarningSent = false;
+        return true;
+    } catch (error) {
+        console.error(`Could not persist the music queue for server ${serverId}:`, error);
+        if (!state.persistenceWarningSent) {
+            state.persistenceWarningSent = true;
+            try {
+                await bot.send(state.textChannelId, '⚠️ The queue is still running, but MongoDB could not save it. It may be lost if the bot restarts.');
+            } catch (sendError) {
+                console.error(`Could not report MongoDB persistence failure for server ${serverId}:`, sendError);
+            }
+        }
+        return false;
+    }
+}
+
+async function restoreQueues() {
+    if (!queueStore) return;
+
+    const restored = await queueStore.loadAll();
+    for (const { serverId, state } of restored) {
+        if (servers.has(serverId)) {
+            console.error(`Skipped a saved queue for server ${serverId}; an active queue already exists.`);
+            continue;
+        }
+        servers.set(serverId, state);
+        startQueue(serverId, state);
+    }
+    console.log(`Restored ${restored.length} saved Yapin music queue(s).`);
+}
 
 async function findCallerVoiceChannel(message) {
     if (!message.server_id) return null;
@@ -220,6 +279,7 @@ async function runQueue(serverId, state) {
             const track = state.queue.shift();
             state.current = track;
             let completedNaturally = false;
+            await persistState(serverId, state);
 
             try {
                 if (!state.call) {
@@ -243,6 +303,7 @@ async function runQueue(serverId, state) {
                 state.paused = false;
                 state.pausedAt = null;
                 state.pausedDuration = 0;
+                await persistState(serverId, state);
             }
         }
     } finally {
@@ -257,6 +318,7 @@ async function runQueue(serverId, state) {
             startQueue(serverId, state);
         } else if (servers.get(serverId) === state) {
             servers.delete(serverId);
+            await persistState(serverId, state);
         }
     }
 }
@@ -294,23 +356,10 @@ bot.command('play', 'Play a song or add it to the server queue', async (message)
             }
 
             if (!state) {
-                state = {
+                state = createServerState({
                     voiceChannelId,
                     textChannelId: message.channel_id,
-                    queue: [],
-                    current: null,
-                    currentProcess: null,
-                    call: null,
-                    worker: null,
-                    stopping: false,
-                    skipRequested: false,
-                    loopMode: 'off',
-                    volume: 100,
-                    paused: false,
-                    startedAt: 0,
-                    pausedAt: null,
-                    pausedDuration: 0
-                };
+                });
                 servers.set(message.server_id, state);
             }
 
@@ -319,6 +368,7 @@ bot.command('play', 'Play a song or add it to the server queue', async (message)
                 || message.username || message.author_id || 'Unknown';
             const tracks = result.tracks.map((track) => ({ ...track, requestedBy }));
             state.queue.push(...tracks);
+            await persistState(message.server_id, state);
             startQueue(message.server_id, state);
             const position = state.queue.length - tracks.length + (state.current ? 1 : 0);
             const added = tracks.length === 1
@@ -375,6 +425,7 @@ bot.command('skip', 'Skip the current song', async (message) => {
     state.paused = false;
     state.pausedAt = null;
     state.currentProcess?.kill();
+    await persistState(message.server_id, state);
     await message.reply('⏭️ Skipped the current song.');
 });
 
@@ -386,6 +437,7 @@ bot.command('stop', 'Stop playback and clear the server queue', async (message) 
     state.queue.length = 0;
     state.paused = false;
     state.currentProcess?.kill();
+    await persistState(message.server_id, state);
     await message.reply('⏹️ Playback stopped and the queue was cleared.');
 });
 
@@ -395,6 +447,7 @@ bot.command('pause', 'Pause the current song', async (message) => {
     state.paused = true;
     state.pausedAt = Date.now();
     state.currentProcess?.stdout.pause();
+    await persistState(message.server_id, state);
     await message.reply('⏸️ Playback paused.');
 });
 
@@ -405,6 +458,7 @@ bot.command('resume', 'Resume the current song', async (message) => {
     state.pausedAt = null;
     state.paused = false;
     state.currentProcess?.stdout.resume();
+    await persistState(message.server_id, state);
     await message.reply('▶️ Playback resumed.');
 });
 
@@ -416,6 +470,7 @@ bot.command('volume', 'Set playback volume from 0 to 100', async (message) => {
         return message.reply('Usage: `/volume 0-100`');
     }
     state.volume = volume;
+    await persistState(message.server_id, state);
     await message.reply(`🔊 Volume set to ${volume}%.`);
 });
 
@@ -424,6 +479,7 @@ bot.command('clearqueue', 'Remove upcoming songs from the queue', async (message
     if (!state || !state.queue.length) return message.reply('There are no upcoming songs to clear.');
     const removed = state.queue.length;
     state.queue.length = 0;
+    await persistState(message.server_id, state);
     await message.reply(`🧹 Cleared ${removed} queued song(s).`);
 });
 
@@ -434,6 +490,7 @@ bot.command('remove', 'Remove a song from the queue by position', async (message
     if (!state?.queue.length) return message.reply('There are no upcoming songs to remove.');
     if (position > state.queue.length) return message.reply(`Choose a position from 1 to ${state.queue.length}.`);
     const [removed] = state.queue.splice(position - 1, 1);
+    await persistState(message.server_id, state);
     await message.reply(`Removed **${displayTitle(removed)}** from the queue.`);
 });
 
@@ -443,6 +500,7 @@ bot.command('loop', 'Set repeat mode: off, song, or queue', async (message) => {
     const mode = message.args?.trim().toLowerCase();
     if (!['off', 'song', 'queue'].includes(mode)) return message.reply('Usage: `/loop off|song|queue`');
     state.loopMode = mode;
+    await persistState(message.server_id, state);
     await message.reply(`🔁 Loop mode set to **${mode}**.`);
 });
 
@@ -453,10 +511,23 @@ bot.command('shuffle', 'Shuffle the upcoming queue', async (message) => {
         const swapIndex = Math.floor(Math.random() * (index + 1));
         [state.queue[index], state.queue[swapIndex]] = [state.queue[swapIndex], state.queue[index]];
     }
+    await persistState(message.server_id, state);
     await message.reply(`🔀 Shuffled ${state.queue.length} upcoming song(s).`);
 });
 
-bot.on('ready', (me) => console.log(`Yapin music bot online as ${me.username}.`));
+bot.on('ready', async (me) => {
+    console.log(`Yapin music bot online as ${me.username}.`);
+    if (!queueStore) {
+        console.warn('MongoDB is not configured; Yapin queues will not survive a restart.');
+        return;
+    }
+
+    try {
+        await restoreQueues();
+    } catch (error) {
+        console.error('Could not restore Yapin music queues from MongoDB:', error);
+    }
+});
 bot.on('error', (error) => console.error('Yapin bot error:', error));
 
 bot.start().catch((error) => {
