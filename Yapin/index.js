@@ -5,6 +5,7 @@ import { Bot, Embed } from './yapper.js';
 import * as rtc from '@livekit/rtc-node';
 import ffmpegPath from 'ffmpeg-static';
 import { getTrackStream } from './audius.js';
+import { getJamendoTrackStream } from './jamendo.js';
 import { getEmbedArtwork } from './embed-artwork.js';
 import { resolveMusicInput } from './music-resolver.js';
 import { connectQueueStore } from './queue-store.js';
@@ -101,6 +102,11 @@ function displayTitle(track) {
     return track.artist ? `${track.artist} - ${track.title}` : track.title;
 }
 
+function sourceAttribution(track) {
+    if (track.provider !== 'jamendo' || !track.url || !track.license) return '';
+    return `\n**Track:** [Jamendo](${track.url}) · [CC license](${track.license})`;
+}
+
 function formatDuration(seconds) {
     const total = Math.max(0, Math.floor(Number(seconds) || 0));
     return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
@@ -123,7 +129,9 @@ async function streamTrack(state, track) {
         return false;
     }
 
-    const audioStream = await getTrackStream(track.id);
+    const audioStream = track.provider === 'jamendo'
+        ? await getJamendoTrackStream(track)
+        : await getTrackStream(track.id);
     if (state.stopping || state.skipRequested) {
         state.skipRequested = false;
         audioStream.destroy();
@@ -152,7 +160,7 @@ async function streamTrack(state, track) {
         if (state.stopping || state.skipRequested) return;
         const embed = new Embed()
             .title(track.title)
-            .description(`**Artist:** ${track.artist || 'Unknown'}\n**Album:** ${track.album || 'Unknown'}\n**Progress:** 0:00 / ${formatDuration(track.duration)}\n**Requested by:** ${track.requestedBy || 'Unknown'}\n**Volume:** ${state.volume}%`)
+            .description(`**Artist:** ${track.artist || 'Unknown'}\n**Album:** ${track.album || 'Unknown'}\n**Progress:** 0:00 / ${formatDuration(track.duration)}\n**Requested by:** ${track.requestedBy || 'Unknown'}\n**Volume:** ${state.volume}%${sourceAttribution(track)}`)
             .color('#5865f2');
         const artwork = getEmbedArtwork(track.artwork);
         if (artwork) embed.thumbnail(artwork);
@@ -331,7 +339,7 @@ function startQueue(serverId, state) {
 
 bot.command('play', 'Play a song or add it to the server queue', async (message) => {
     const query = message.args?.trim();
-    if (!query) return message.reply('Usage: `/play song name, Spotify link, YouTube link, or Audius link`');
+    if (!query) return message.reply('Usage: `/play song name, Spotify link, YouTube link, Audius link, or jamendo: search terms`');
     if (!message.server_id) return message.reply('Music playback is only available in a server.');
 
     try {
@@ -410,7 +418,7 @@ bot.command('nowplaying', 'Show the current track and playback progress', async 
         : formatDuration(elapsed);
     const embed = new Embed()
         .title(track.title)
-        .description(`**Artist:** ${track.artist || 'Unknown'}\n**Album:** ${track.album || 'Unknown'}\n**Progress:** ${progress}${state.paused ? ' (paused)' : ''}\n**Requested by:** ${track.requestedBy || 'Unknown'}\n**Volume:** ${state.volume}%`)
+        .description(`**Artist:** ${track.artist || 'Unknown'}\n**Album:** ${track.album || 'Unknown'}\n**Progress:** ${progress}${state.paused ? ' (paused)' : ''}\n**Requested by:** ${track.requestedBy || 'Unknown'}\n**Volume:** ${state.volume}%${sourceAttribution(track)}`)
         .color('#5865f2');
     const artwork = getEmbedArtwork(track.artwork);
     if (artwork) embed.thumbnail(artwork);

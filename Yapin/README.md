@@ -15,16 +15,19 @@ For Bot-Hosting.net, set the startup command to `npm run start:yapin` and add `Y
 
 ### Music lookup and playback sources
 
-The bot uses Spotify and YouTube for metadata only. It never streams or downloads audio from either service. Spotify tracks, albums, and playlists, and YouTube videos and playlists, are matched against streamable Audius tracks before being queued. Plain-text searches also require a close title and artist match; titles marked as remixes, edits, instrumentals, covers, bootlegs, or similar versions are skipped. A playlist is limited to 50 entries; items without a sufficiently close title and artist match are skipped. Audius links and searches remain supported. Audius is user-uploaded, so metadata matching cannot guarantee that an upload is an official master recording; an exact original that is not available in Audius will not play.
+The bot uses Spotify and YouTube for metadata only. It never streams or downloads audio from either service. Spotify tracks, albums, and playlists, and YouTube videos and playlists, are matched against streamable Audius tracks before being queued. Plain-text searches also require a close title and artist match; titles marked as remixes, edits, instrumentals, covers, bootlegs, or similar versions are skipped. If no Audius match is found, the bot can search Jamendo's streamable catalog when `JAMENDO_CLIENT_ID` is configured. Jamendo searches use the catalog's own audio stream URLs and only accept CC BY/CC BY-SA tracks; the Now Playing embed links to the track and its license. Use `/play jamendo: search terms` to search Jamendo directly. Jamendo's catalog is mainly independent music, not a way to play every mainstream commercial release. A playlist is limited to 50 entries; items without a sufficiently close title and artist match are skipped. Audius links and searches remain supported. Audius is user-uploaded, so metadata matching cannot guarantee that an upload is an official master recording; an exact original that is not available in either playable catalog will not play.
 
 Set the following as secret environment variables when using each service:
 
 - `YAPPER_BOT_TOKEN` — required Yapin bot token.
 - `AUDIUS_API_KEY` — optional Audius API key; recommended for API access.
+- `JAMENDO_CLIENT_ID` — optional Jamendo developer application ID for direct catalog search and playback.
 - `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` — optional Spotify app credentials for Spotify search and links.
 - `YOUTUBE_API_KEY` — optional Google API key with YouTube Data API v3 enabled for YouTube search and links.
 - `MONGODB_URI` — optional MongoDB connection string for saved queues; without it, queues remain in memory only.
 - `MONGODB_DATABASE` — optional MongoDB database name (defaults to `musicfr`).
+
+Get your own `JAMENDO_CLIENT_ID` by registering an application in the [Jamendo developer portal](https://devportal.jamendo.com). The shared documentation test ID is not a production credential.
 
 The bot needs permission to view voice channels and connect. Each Yapin server has an independent queue and one voice connection. When `MONGODB_URI` is configured, the current track, upcoming tracks, loop mode, volume, and channel IDs are saved in MongoDB. After a restart, playback resumes from the interrupted track and continues with the saved queue. Without MongoDB configured, queue state is held in memory and is lost on restart. Use a single running bot instance for a given Yapin app to avoid two processes restoring and playing the same saved queues. Multiple users can add tracks to the same server queue, but users must be in the same voice channel as the active session.
 

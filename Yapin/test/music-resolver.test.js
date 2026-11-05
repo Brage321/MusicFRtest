@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getTrackStream } from '../audius.js';
+import { getJamendoTrackStream } from '../jamendo.js';
 import { getEmbedArtwork } from '../embed-artwork.js';
 import { resolveMusicInput } from '../music-resolver.js';
 
@@ -8,7 +9,8 @@ const originalFetch = globalThis.fetch;
 const originalEnvironment = {
     SPOTIFY_CLIENT_ID: process.env.SPOTIFY_CLIENT_ID,
     SPOTIFY_CLIENT_SECRET: process.env.SPOTIFY_CLIENT_SECRET,
-    YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY
+    YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
+    JAMENDO_CLIENT_ID: process.env.JAMENDO_CLIENT_ID
 };
 
 function jsonResponse(data, status = 200) {
@@ -39,12 +41,93 @@ test.after(() => {
     }
 });
 
+test.afterEach(() => {
+    const value = originalEnvironment.JAMENDO_CLIENT_ID;
+    if (value === undefined) delete process.env.JAMENDO_CLIENT_ID;
+    else process.env.JAMENDO_CLIENT_ID = value;
+});
+
 test('only uses image hosts accepted by Yapin embeds', () => {
     assert.equal(getEmbedArtwork('https://media.tenor.com/cover.jpg'), 'https://media.tenor.com/cover.jpg');
     assert.equal(getEmbedArtwork('https://cdn.audius.co/cover.jpg'), null);
     assert.equal(getEmbedArtwork('https://i.scdn.co/image/cover'), null);
     assert.equal(getEmbedArtwork('http://i.imgur.com/cover.jpg'), null);
     assert.equal(getEmbedArtwork('not a URL'), null);
+});
+
+test('searches and resolves a directly playable Jamendo track', async () => {
+    process.env.JAMENDO_CLIENT_ID = 'test-jamendo-id';
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        if (url.hostname === 'api.audius.co') {
+            return jsonResponse({ data: [] });
+        }
+        assert.equal(url.hostname, 'api.jamendo.com');
+        assert.equal(url.searchParams.get('search'), 'Song - Artist');
+        assert.equal(url.searchParams.get('ccnc'), 'false');
+        assert.equal(url.searchParams.get('ccnd'), 'false');
+        return jsonResponse({
+            headers: { status: 'success', error_message: '' },
+            results: [{
+                id: '123',
+                name: 'Song',
+                artist_name: 'Artist',
+                album_name: 'Album',
+                duration: 180,
+                audio: 'https://api.jamendo.com/audio/123.mp3',
+                shareurl: 'https://www.jamendo.com/track/123',
+                license_ccurl: 'https://creativecommons.org/licenses/by/4.0/'
+            }]
+        });
+    };
+
+    const result = await resolveMusicInput('Song - Artist');
+    assert.equal(result.source, 'Jamendo');
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].provider, 'jamendo');
+    assert.equal(result.tracks[0].streamUrl, 'https://api.jamendo.com/audio/123.mp3');
+});
+
+test('does not queue Jamendo tracks with licenses that do not allow redistribution', async () => {
+    process.env.JAMENDO_CLIENT_ID = 'test-jamendo-id';
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        if (url.hostname === 'api.audius.co') return jsonResponse({ data: [] });
+        return jsonResponse({
+            headers: { status: 'success', error_message: '' },
+            results: [{
+                id: '123',
+                name: 'Song',
+                artist_name: 'Artist',
+                audio: 'https://api.jamendo.com/audio/123.mp3',
+                license_ccurl: 'https://creativecommons.org/licenses/by-nc-nd/4.0/'
+            }]
+        });
+    };
+
+    const result = await resolveMusicInput('Song - Artist');
+    assert.equal(result.tracks.length, 0);
+});
+
+test('streams Jamendo audio as a Node stream for the existing LiveKit pipeline', async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async (input, options) => {
+        assert.equal(String(input), 'https://api.jamendo.com/audio/123.mp3');
+        assert.equal(options.redirect, 'manual');
+        return new Response(new Uint8Array([1, 2, 3]));
+    };
+
+    try {
+        const stream = await getJamendoTrackStream({
+            provider: 'jamendo',
+            streamUrl: 'https://api.jamendo.com/audio/123.mp3'
+        });
+        assert.equal(typeof stream.pipe, 'function');
+        const chunk = await stream[Symbol.asyncIterator]().next();
+        assert.deepEqual([...chunk.value], [1, 2, 3]);
+    } finally {
+        globalThis.fetch = previousFetch;
+    }
 });
 
 test('stream response timeout is cleared after headers so full-length audio stays connected', async () => {

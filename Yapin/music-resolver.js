@@ -1,4 +1,5 @@
 import { searchTracks, resolveTrackUrl } from './audius.js';
+import { searchJamendoTracks } from './jamendo.js';
 import { isSpotifyUrl, resolveSpotify } from './spotify.js';
 import { isYouTubeUrl, resolveYouTube } from './youtube.js';
 
@@ -90,7 +91,11 @@ async function findPlayableTrack(metadata) {
     const query = [metadata.artist, metadata.title].filter(Boolean).join(' ');
     const candidates = await searchTracks(query);
     const match = candidates.find((candidate) => matches(candidate, metadata));
-    if (!match) return null;
+    if (!match) {
+        if (!process.env.JAMENDO_CLIENT_ID) return null;
+        const jamendoCandidates = await searchJamendoTracks(query);
+        return jamendoCandidates.find((candidate) => matches(candidate, metadata)) || null;
+    }
 
     return {
         id: match.id,
@@ -148,8 +153,22 @@ function mapDirectAudiusTrack(track) {
 
 export async function resolveMusicInput(query) {
     const trimmed = query.trim();
+    const jamendoSearch = trimmed.match(/^jamendo:\s*(.+)$/i);
     const spotifySearch = trimmed.match(/^(?:spotify|sp):\s+(.+)$/i);
     const youtubeSearch = trimmed.match(/^(?:youtube|yt):\s+(.+)$/i);
+
+    if (jamendoSearch) {
+        const requested = splitTitleAndArtist(jamendoSearch[1]);
+        const tracks = await searchJamendoTracks(jamendoSearch[1]);
+        const match = tracks.find((candidate) => matches(candidate, requested));
+        return {
+            tracks: match ? [match] : [],
+            unavailable: tracks.length && !match ? 1 : 0,
+            collectionName: '',
+            source: 'Jamendo',
+            truncated: false
+        };
+    }
 
     if (isSpotifyUrl(trimmed) || spotifySearch) {
         const result = await resolveSpotify(spotifySearch?.[1] || trimmed);
@@ -182,7 +201,22 @@ export async function resolveMusicInput(query) {
     const search = splitTitleAndArtist(trimmed);
     const results = await searchTracks(trimmed);
     const track = results.find((candidate) => matches(candidate, search));
-    if (!track) return { tracks: [], unavailable: results.length ? 1 : 0, collectionName: '', source: 'Audius', truncated: false };
+    if (!track) {
+        if (process.env.JAMENDO_CLIENT_ID) {
+            const jamendoTracks = await searchJamendoTracks(trimmed);
+            const jamendoTrack = jamendoTracks.find((candidate) => matches(candidate, search));
+            if (jamendoTrack) {
+                return {
+                    tracks: [jamendoTrack],
+                    unavailable: 0,
+                    collectionName: '',
+                    source: 'Jamendo',
+                    truncated: false
+                };
+            }
+        }
+        return { tracks: [], unavailable: results.length ? 1 : 0, collectionName: '', source: 'Audius', truncated: false };
+    }
     return {
         tracks: [mapDirectAudiusTrack(track)],
         unavailable: 0,
