@@ -13,10 +13,19 @@ The official [Yapin JavaScript SDK](https://yapin.gg/sdk/yapper.js) is included 
 
 For Bot-Hosting.net, set the startup command to `npm run start:yapin` and add `YAPPER_BOT_TOKEN` as a masked secret environment variable. The root script installs this folder's production dependencies before launch.
 
-### Audius catalog and API key
+### Music lookup and playback sources
 
-Playback searches and streams from the Audius catalog only. Tracks that are not available there cannot be played, and availability may differ from other music services. For API access, create a read-only API key in [Audius app settings](https://audius.co/settings) and add it as the `AUDIUS_API_KEY` secret environment variable in Bot-Hosting.net.
+The bot uses Spotify and YouTube for metadata only. It never streams or downloads audio from either service. Spotify tracks, albums, and playlists, and YouTube videos and playlists, are matched against streamable Audius tracks before being queued. A playlist is limited to 50 entries; items without a sufficiently close title and artist match are skipped. Audius links and searches remain supported.
 
-The bot needs permission to view voice channels and connect. It supports `/play`, `/queue`, `/skip`, and `/stop`. `/play` searches the music catalog and joins the voice channel of the person who invoked it. Each server has one queue and one voice connection; tracks play sequentially.
+Set the following as secret environment variables when using each service:
 
-Yapin's voice-join API is currently documented as in testing and limited to 10 joins/leaves per minute. The bot uses `ffmpeg-static` to decode audio and Yapin's LiveKit voice API to publish it. Spotify and saved-playlist features from the Discord bot are not included in this initial port.
+- `YAPPER_BOT_TOKEN` — required Yapin bot token.
+- `AUDIUS_API_KEY` — optional Audius API key; recommended for API access.
+- `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` — optional Spotify app credentials for Spotify search and links.
+- `YOUTUBE_API_KEY` — optional Google API key with YouTube Data API v3 enabled for YouTube search and links.
+
+The bot needs permission to view voice channels and connect. Each Yapin server has an independent in-memory queue and one voice connection, and queues are not persisted across restarts. Multiple users can add tracks to the same server queue, but users must be in the same voice channel as the active session.
+
+Available commands: `/play`, `/pause`, `/resume`, `/skip`, `/stop`, `/queue`, `/nowplaying`, `/volume 0-100`, `/clearqueue`, `/remove position`, `/loop off|song|queue`, and `/shuffle`. You can search Spotify by default when its credentials are configured, or use `spotify: song name` and `youtube: song name` to select a metadata search explicitly. YouTube full-audio playback is not supported by its documented APIs; a YouTube result is queued only if a verified playable Audius match exists. This does not grant additional rights to redistribute a track, so ensure the relevant track and service terms permit your use.
+
+Yapin's voice-join API is documented as in testing and limited to 10 joins/leaves per minute. The bot uses `ffmpeg-static` to decode the permitted audio stream and Yapin's LiveKit voice API to publish it.

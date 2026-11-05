@@ -29,8 +29,12 @@ The Yapin version is a separate deployment from the Discord bot:
 2. Set the startup command to `npm run start:yapin`.
 3. Add `YAPPER_BOT_TOKEN` as a secret environment variable in the deployment settings. Do not put the token in source code or commit it.
 4. Add `AUDIUS_API_KEY` as a secret environment variable. Create a read-only key in [Audius app settings](https://audius.co/settings).
-5. Start the deployment. The script installs the Yapin-specific dependencies and launches `Yapin/index.js`.
-6. Add the bot to your Yapin server and grant it permission to view voice channels and connect.
+5. To enable Spotify metadata lookup, add `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` from a Spotify developer app as secret variables.
+6. To enable YouTube metadata lookup, add `YOUTUBE_API_KEY` from a Google Cloud project with YouTube Data API v3 enabled.
+7. Start the deployment. The script installs the Yapin-specific dependencies and launches `Yapin/index.js`.
+8. Add the bot to your Yapin server and grant it permission to view voice channels and connect.
+
+Spotify and YouTube are used for search and metadata only, not for audio streaming. Their results are queued only when a matching streamable Audius track is found. See [`Yapin/README.md`](./Yapin/README.md) for source and command limitations.
 
 Use the token from Yapin's Developer settings, and rotate it immediately if it has been shared or exposed. The existing `npm start` command still starts the Discord version.
 
@@ -135,7 +139,7 @@ A separate browser-based radio player is available in [`FeedFm/`](./FeedFm/READM
 
 ### Yapin bot (experimental)
 
-An initial Yapin music-bot port is available in [`Yapin/`](./Yapin/README.md). It searches and streams from the Audius catalog and supports a per-server queue through Yapin's LiveKit voice API. See its setup guide; the existing Discord bot and its `npm start` command are unchanged.
+The Yapin music bot is available in [`Yapin/`](./Yapin/README.md). It supports per-server queues and playback controls through Yapin's LiveKit voice API. Spotify and YouTube provide search and metadata only; queueing requires a matching Audius stream. See its setup guide for required and optional secrets. The existing Discord bot and its `npm start` command are unchanged.
 
 ### Prerequisites
 

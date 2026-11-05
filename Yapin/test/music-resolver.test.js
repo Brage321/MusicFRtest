@@ -1,0 +1,309 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { resolveMusicInput } from '../music-resolver.js';
+
+const originalFetch = globalThis.fetch;
+const originalEnvironment = {
+    SPOTIFY_CLIENT_ID: process.env.SPOTIFY_CLIENT_ID,
+    SPOTIFY_CLIENT_SECRET: process.env.SPOTIFY_CLIENT_SECRET,
+    YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY
+};
+
+function jsonResponse(data, status = 200) {
+    return new Response(JSON.stringify(data), {
+        status,
+        headers: { 'content-type': 'application/json' }
+    });
+}
+
+function setAudiusResults(items) {
+    return {
+        data: items.map((item, index) => ({
+            id: `audius-${index}`,
+            title: item.title,
+            duration: item.duration || 200,
+            is_streamable: true,
+            user: { name: item.artist },
+            artwork: { '480x480': 'https://images.example.test/cover.jpg' }
+        }))
+    };
+}
+
+test.after(() => {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(originalEnvironment)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+    }
+});
+
+test('resolves Spotify track URLs to verified Audius playback metadata', async () => {
+    process.env.SPOTIFY_CLIENT_ID = 'test-client';
+    process.env.SPOTIFY_CLIENT_SECRET = 'test-secret';
+    const calls = [];
+    globalThis.fetch = async (input, options = {}) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.includes('accounts.spotify.com')) return jsonResponse({ access_token: 'test-token', expires_in: 3600 });
+        if (url.includes('api.spotify.com/v1/tracks/')) {
+            return jsonResponse({
+                name: 'Blinding Lights',
+                artists: [{ name: 'The Weeknd' }],
+                album: { name: 'After Hours', images: [{ url: 'https://images.example.test/spotify.jpg' }] },
+                duration_ms: 200000,
+                external_urls: { spotify: 'https://open.spotify.com/track/1234567890' }
+            });
+        }
+        if (url.includes('api.audius.co')) {
+            return jsonResponse(setAudiusResults([{ title: 'Blinding Lights', artist: 'The Weeknd' }]));
+        }
+        throw new Error(`Unexpected request: ${options.method || 'GET'} ${url}`);
+    };
+
+    const result = await resolveMusicInput('https://open.spotify.com/track/1234567890');
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].title, 'Blinding Lights');
+    assert.equal(result.tracks[0].artist, 'The Weeknd');
+    assert.equal(result.tracks[0].album, 'After Hours');
+    assert.equal(result.tracks[0].id, 'audius-0');
+    assert.ok(calls.some((url) => url.includes('/v1/tracks/1234567890')));
+});
+
+test('resolves Spotify track URIs without treating the URI as audio', async () => {
+    process.env.SPOTIFY_CLIENT_ID = 'test-client';
+    process.env.SPOTIFY_CLIENT_SECRET = 'test-secret';
+    globalThis.fetch = async (input) => {
+        const url = String(input);
+        if (url.includes('accounts.spotify.com')) return jsonResponse({ access_token: 'test-token', expires_in: 3600 });
+        if (url.includes('api.spotify.com/v1/tracks/1234567890')) {
+            return jsonResponse({
+                name: 'Blinding Lights',
+                artists: [{ name: 'The Weeknd' }],
+                album: { name: 'After Hours', images: [] },
+                duration_ms: 200000
+            });
+        }
+        if (url.includes('api.audius.co')) {
+            return jsonResponse(setAudiusResults([{ title: 'Blinding Lights', artist: 'The Weeknd' }]));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await resolveMusicInput('spotify:track:1234567890');
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].title, 'Blinding Lights');
+});
+
+test('maps Spotify playlist entries and reports tracks without a close match', async () => {
+    const calls = [];
+    globalThis.fetch = async (input) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.includes('api.spotify.com/v1/playlists/')) {
+            if (url.includes('/tracks?')) {
+                return jsonResponse({
+                    items: [
+                        { track: { name: 'Blinding Lights', artists: [{ name: 'The Weeknd' }], album: { name: 'After Hours', images: [] }, duration_ms: 200000 } },
+                        { track: { name: 'Unmatched Song', artists: [{ name: 'Unknown Artist' }], album: { name: 'Unknown', images: [] }, duration_ms: 180000 } }
+                    ],
+                    next: null
+                });
+            }
+            return jsonResponse({
+                name: 'Test playlist',
+                tracks: { href: 'https://api.spotify.com/v1/playlists/playlist12345/tracks?limit=50' }
+            });
+        }
+        if (url.includes('api.audius.co')) {
+            return jsonResponse(setAudiusResults(url.includes('Blinding')
+                ? [{ title: 'Blinding Lights', artist: 'The Weeknd' }]
+                : []));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await resolveMusicInput('https://open.spotify.com/playlist/playlist12345');
+    assert.equal(result.collectionName, 'Test playlist');
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.unavailable, 1);
+    assert.ok(calls.some((url) => url.includes('/playlists/playlist12345/tracks')));
+});
+
+test('searches Spotify and resolves an album to its Audius matches', async () => {
+    globalThis.fetch = async (input) => {
+        const url = String(input);
+        if (url.includes('api.spotify.com/v1/search')) {
+            return jsonResponse({
+                tracks: {
+                    items: [{
+                        name: 'Blinding Lights',
+                        artists: [{ name: 'The Weeknd' }],
+                        album: { name: 'After Hours', images: [{ url: 'https://images.example.test/cover.jpg' }] },
+                        duration_ms: 200000
+                    }]
+                }
+            });
+        }
+        if (url.includes('api.spotify.com/v1/albums/album123456/tracks')) {
+            return jsonResponse({
+                items: [{
+                    name: 'Blinding Lights',
+                    artists: [{ name: 'The Weeknd' }],
+                    duration_ms: 200000
+                }],
+                next: null
+            });
+        }
+        if (url.includes('api.spotify.com/v1/albums/album123456')) {
+            return jsonResponse({
+                name: 'After Hours',
+                images: [{ url: 'https://images.example.test/cover.jpg' }]
+            });
+        }
+        if (url.includes('api.audius.co')) {
+            return jsonResponse(setAudiusResults([{ title: 'Blinding Lights', artist: 'The Weeknd' }]));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const search = await resolveMusicInput('Blinding Lights');
+    assert.equal(search.tracks[0].title, 'Blinding Lights');
+
+    const album = await resolveMusicInput('https://open.spotify.com/album/album123456');
+    assert.equal(album.collectionName, 'After Hours');
+    assert.equal(album.tracks.length, 1);
+    assert.equal(album.tracks[0].artwork, 'https://images.example.test/cover.jpg');
+});
+
+test('uses YouTube metadata but only queues an exact artist/title Audius match', async () => {
+    process.env.YOUTUBE_API_KEY = 'test-youtube-key';
+    globalThis.fetch = async (input) => {
+        const url = String(input);
+        if (url.includes('youtube/v3/videos')) {
+            return jsonResponse({
+                items: [{
+                    id: 'abcdefghijk',
+                    snippet: {
+                        title: 'Blinding Lights (Official Audio)',
+                        channelTitle: 'The Weeknd',
+                        thumbnails: { high: { url: 'https://images.example.test/youtube.jpg' } }
+                    },
+                    contentDetails: { duration: 'PT3M20S' },
+                    status: { privacyStatus: 'public', embeddable: true }
+                }]
+            });
+        }
+        if (url.includes('api.audius.co')) {
+            return jsonResponse(setAudiusResults([{ title: 'Blinding Lights', artist: 'The Weeknd' }]));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await resolveMusicInput('https://youtu.be/abcdefghijk');
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].duration, 200);
+    assert.equal(result.tracks[0].id, 'audius-0');
+    assert.equal(result.tracks[0].artwork, 'https://images.example.test/youtube.jpg');
+});
+
+test('searches multiple YouTube results but adds only the verified match', async () => {
+    process.env.YOUTUBE_API_KEY = 'test-youtube-key';
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        if (url.hostname === 'www.googleapis.com' && url.pathname.endsWith('/search')) {
+            assert.equal(url.searchParams.get('maxResults'), '5');
+            return jsonResponse({
+                items: [
+                    { id: { videoId: 'abcdefghijk' } },
+                    { id: { videoId: 'lmnopqrstuv' } }
+                ]
+            });
+        }
+        if (url.pathname.endsWith('/videos')) {
+            return jsonResponse({
+                items: [
+                    {
+                        id: 'abcdefghijk',
+                        snippet: { title: 'Wrong Song', channelTitle: 'Wrong Artist', thumbnails: {} },
+                        contentDetails: { duration: 'PT3M' },
+                        status: { privacyStatus: 'public', embeddable: true }
+                    },
+                    {
+                        id: 'lmnopqrstuv',
+                        snippet: { title: 'Blinding Lights', channelTitle: 'The Weeknd', thumbnails: {} },
+                        contentDetails: { duration: 'PT3M20S' },
+                        status: { privacyStatus: 'public', embeddable: true }
+                    }
+                ]
+            });
+        }
+        if (url.hostname === 'api.audius.co') {
+            return jsonResponse(setAudiusResults(url.searchParams.get('query').includes('Wrong')
+                ? [{ title: 'Wrong Song', artist: 'Wrong Artist' }]
+                : [{ title: 'Blinding Lights', artist: 'The Weeknd' }]));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await resolveMusicInput('youtube: Blinding Lights');
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].title, 'Blinding Lights');
+    assert.equal(result.unavailable, 0);
+});
+
+test('reads YouTube playlist metadata and queues only matching audio', async () => {
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith('/playlists')) {
+            return jsonResponse({ items: [{ snippet: { title: 'Test videos' } }] });
+        }
+        if (url.pathname.endsWith('/playlistItems')) {
+            return jsonResponse({ items: [{ contentDetails: { videoId: 'abcdefghijk' } }] });
+        }
+        if (url.pathname.endsWith('/videos')) {
+            return jsonResponse({
+                items: [{
+                    id: 'abcdefghijk',
+                    snippet: {
+                        title: 'Blinding Lights',
+                        channelTitle: 'The Weeknd',
+                        thumbnails: {}
+                    },
+                    contentDetails: { duration: 'PT3M20S' },
+                    status: { privacyStatus: 'public', embeddable: true }
+                }]
+            });
+        }
+        if (url.hostname === 'api.audius.co') {
+            return jsonResponse(setAudiusResults([{ title: 'Blinding Lights', artist: 'The Weeknd' }]));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await resolveMusicInput('https://music.youtube.com/playlist?list=PL123456789');
+    assert.equal(result.collectionName, 'Test videos');
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].artist, 'The Weeknd');
+});
+
+test('does not queue a different version of the requested song', async () => {
+    globalThis.fetch = async (input) => {
+        const url = String(input);
+        if (url.includes('api.spotify.com/v1/tracks/')) {
+            return jsonResponse({
+                name: 'Blinding Lights',
+                artists: [{ name: 'The Weeknd' }],
+                album: { name: 'After Hours', images: [] },
+                duration_ms: 200000
+            });
+        }
+        if (url.includes('api.audius.co')) {
+            return jsonResponse(setAudiusResults([{ title: 'Blinding Lights Instrumental', artist: 'The Weeknd' }]));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await resolveMusicInput('https://open.spotify.com/track/1234567890');
+    assert.equal(result.tracks.length, 0);
+    assert.equal(result.unavailable, 1);
+});

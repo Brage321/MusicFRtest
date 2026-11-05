@@ -1,0 +1,139 @@
+import { searchTracks, resolveTrackUrl } from './audius.js';
+import { isSpotifyUrl, resolveSpotify } from './spotify.js';
+import { isYouTubeUrl, resolveYouTube } from './youtube.js';
+
+const MAX_MATCHES = 50;
+
+function normalize(value) {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/\((?:official\s+(?:audio|video)|lyrics?|lyric\s+video|visuali[sz]er)\)/g, ' ')
+        .replace(/\b(official|audio|video|lyrics?|visuali[sz]er|vevo|topic|hd|4k)\b/g, ' ')
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .trim();
+}
+
+function tokenSimilarity(left, right) {
+    const a = new Set(left.split(/\s+/).filter(Boolean));
+    const b = new Set(right.split(/\s+/).filter(Boolean));
+    if (!a.size || !b.size) return 0;
+    let shared = 0;
+    for (const token of a) if (b.has(token)) shared += 1;
+    return (2 * shared) / (a.size + b.size);
+}
+
+function queryMatches(metadata, query) {
+    const queryTerms = new Set(normalize(query).split(/\s+/).filter(Boolean));
+    const resultTerms = new Set(normalize(`${metadata.title} ${metadata.artist}`).split(/\s+/).filter(Boolean));
+    if (!queryTerms.size || !resultTerms.size) return false;
+    let shared = 0;
+    for (const term of queryTerms) if (resultTerms.has(term)) shared += 1;
+    return shared / queryTerms.size >= 0.65;
+}
+
+function matches(candidate, metadata) {
+    const expectedTitle = normalize(metadata.title);
+    const candidateArtist = normalize(candidate.artist);
+    let candidateTitle = normalize(candidate.title);
+    if (candidateArtist && candidateTitle.startsWith(`${candidateArtist} `)) {
+        candidateTitle = candidateTitle.slice(candidateArtist.length).trim();
+    }
+    const titleScore = tokenSimilarity(expectedTitle, candidateTitle);
+    if (!expectedTitle || titleScore < 0.9) return false;
+
+    const expectedArtist = normalize(metadata.artist);
+    if (!expectedArtist) return titleScore >= 0.95;
+    return tokenSimilarity(expectedArtist, candidateArtist) >= 0.5;
+}
+
+async function findPlayableTrack(metadata) {
+    const query = [metadata.artist, metadata.title].filter(Boolean).join(' ');
+    const candidates = await searchTracks(query);
+    const match = candidates.find((candidate) => matches(candidate, metadata));
+    if (!match) return null;
+
+    return {
+        id: match.id,
+        title: metadata.title,
+        artist: metadata.artist || match.artist,
+        album: metadata.album || '',
+        artwork: metadata.artwork || '',
+        duration: metadata.duration || match.duration || 0,
+        sourceUrl: metadata.url || ''
+    };
+}
+
+async function mapToPlayable(tracks) {
+    const results = [];
+    let unavailable = 0;
+    const list = tracks.slice(0, MAX_MATCHES);
+    for (let index = 0; index < list.length; index += 5) {
+        const batch = await Promise.all(list.slice(index, index + 5).map(findPlayableTrack));
+        for (const playable of batch) {
+            if (playable) results.push(playable);
+            else unavailable += 1;
+        }
+    }
+    return { tracks: results, unavailable };
+}
+
+async function mapFirstPlayable(tracks, query) {
+    for (const metadata of tracks.slice(0, 5)) {
+        if (!queryMatches(metadata, query)) continue;
+        const track = await findPlayableTrack(metadata);
+        if (track) return { tracks: [track], unavailable: 0 };
+    }
+    return { tracks: [], unavailable: tracks.length ? 1 : 0 };
+}
+
+export async function resolveMusicInput(query) {
+    const trimmed = query.trim();
+    const spotifySearch = trimmed.match(/^(?:spotify|sp):\s+(.+)$/i);
+    const youtubeSearch = trimmed.match(/^(?:youtube|yt):\s+(.+)$/i);
+
+    if (isSpotifyUrl(trimmed) || spotifySearch) {
+        const result = await resolveSpotify(spotifySearch?.[1] || trimmed);
+        const mapped = await mapToPlayable(result.tracks);
+        return { ...mapped, collectionName: result.name || '', source: 'Spotify', truncated: result.truncated || false };
+    }
+
+    if (isYouTubeUrl(trimmed) || youtubeSearch) {
+        const searchQuery = youtubeSearch?.[1];
+        const result = await resolveYouTube(searchQuery || trimmed);
+        const mapped = result.type === 'search'
+            ? await mapFirstPlayable(result.tracks, searchQuery)
+            : await mapToPlayable(result.tracks);
+        return { ...mapped, collectionName: result.name || '', source: 'YouTube', truncated: result.truncated || false };
+    }
+
+    if (process.env.SPOTIFY_CLIENT_ID || process.env.SPOTIFY_CLIENT_SECRET) {
+        const result = await resolveSpotify(trimmed);
+        if (result.tracks.length) {
+            const mapped = await mapToPlayable(result.tracks);
+            return { ...mapped, collectionName: '', source: 'Spotify', truncated: false };
+        }
+    }
+
+    if (/^https?:\/\//i.test(trimmed)) {
+        const track = await resolveTrackUrl(trimmed);
+        return { tracks: track ? [track] : [], unavailable: 0, collectionName: '', source: 'Audius', truncated: false };
+    }
+
+    const results = await searchTracks(trimmed);
+    const track = results[0];
+    if (!track) return { tracks: [], unavailable: 0, collectionName: '', source: 'Audius', truncated: false };
+    return {
+        tracks: [{
+            ...track,
+            title: track.title,
+            artist: track.artist,
+            album: '',
+            artwork: track.artwork || '',
+            duration: track.duration || 0
+        }],
+        unavailable: 0,
+        collectionName: '',
+        source: 'Audius',
+        truncated: false
+    };
+}

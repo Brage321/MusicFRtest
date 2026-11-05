@@ -32,7 +32,10 @@ function toTrack(item) {
         id: item.id,
         title: item.title,
         artist: item.user?.name || item.artist || '',
-        duration: item.duration,
+        album: '',
+        artwork: item.artwork?.['480x480'] || item.artwork?.['150x150'] || item.artwork?.['1000x1000'] || '',
+        duration: Number(item.duration) || 0,
+        url: item.permalink ? `https://audius.co${item.permalink}` : '',
         streamable: item.is_streamable !== false
     };
 }
