@@ -2,6 +2,7 @@ import { Readable } from 'node:stream';
 
 const API_BASE = 'https://api.audius.co/v1';
 const STREAM_RESPONSE_TIMEOUT_MS = 30_000;
+const SEARCH_RESULT_LIMIT = 100;
 
 async function fetchStreamResponse(url, options) {
     const controller = new AbortController();
@@ -61,7 +62,7 @@ function toTrack(item) {
 }
 
 export async function searchTracks(query) {
-    const params = new URLSearchParams({ query, limit: '10' });
+    const params = new URLSearchParams({ query, limit: String(SEARCH_RESULT_LIMIT) });
     const response = await apiRequest(`/tracks/search?${params}`);
     const items = Array.isArray(response.data) ? response.data : [];
     return items.map(toTrack).filter((track) => track?.streamable);

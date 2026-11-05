@@ -539,6 +539,30 @@ test('plays the requested artist when the title and artist both match', async ()
     assert.equal(result.tracks[0].artist, 'The Weeknd');
 });
 
+test('searches deeper in Audius results to find a verified original match', async () => {
+    delete process.env.SPOTIFY_CLIENT_ID;
+    delete process.env.SPOTIFY_CLIENT_SECRET;
+    delete process.env.JAMENDO_CLIENT_ID;
+    delete process.env.FREETOUSE_PLAYBACK_AUTHORIZED;
+    globalThis.fetch = async (input) => {
+        const url = new URL(String(input));
+        if (url.hostname !== 'api.audius.co') throw new Error(`Unexpected request: ${url}`);
+        assert.equal(url.searchParams.get('limit'), '100');
+        return jsonResponse(setAudiusResults([
+            ...Array.from({ length: 10 }, (_, index) => ({
+                title: 'Blinding Lights',
+                artist: `Different Artist ${index}`
+            })),
+            { title: 'Blinding Lights', artist: 'The Weeknd' }
+        ]));
+    };
+
+    const result = await resolveMusicInput('Blinding Lights - The Weeknd');
+    assert.equal(result.tracks.length, 1);
+    assert.equal(result.tracks[0].artist, 'The Weeknd');
+    assert.equal(result.tracks[0].id, 'audius-10');
+});
+
 test('uses YouTube metadata but only queues an exact artist/title Audius match', async () => {
     process.env.YOUTUBE_API_KEY = 'test-youtube-key';
     globalThis.fetch = async (input) => {
