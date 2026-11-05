@@ -167,10 +167,11 @@ export class Bot {
     this.token = String(token).trim();
     // YAPPER_API_URL: set by bot hosting (usable anywhere) to point at another API host. The default is our own API
     // host; if it can't be reached the SDK uses the website's address for 10 minutes (same API, same token).
-    const chosen = opts.base || globalThis.process?.env?.YAPPER_API_URL;
+    const configuredBase = globalThis.process?.env?.YAPPER_API_URL;
+    const chosen = opts.base || configuredBase;
     this.base = (chosen || 'https://bots.yapper.website/api/bot/v1').replace(/\/$/, '');
     // Hosted bots get our host through YAPPER_API_URL: they keep the fallback too; any other chosen base doesn't.
-    this._fallback = chosen && this.base !== 'https://bots.yapper.website/api/bot/v1' ? null : 'https://www.yapin.gg/api/bot/v1';
+    this._fallback = opts.base ? null : 'https://www.yapin.gg/api/bot/v1';
     this._fallbackUntil = 0;
     this.gateway = opts.gateway === false || typeof globalThis.WebSocket !== 'function' ? null : (opts.gateway || 'wss://rt.yapper.website/bot');
     this.prefixes = opts.prefixes || ['/', '!'];
@@ -517,7 +518,7 @@ export class Bot {
           if (method === 'GET' && attempt < retries) continue;
           throw e;
         }
-        if ((res.status === 502 || res.status === 504) && this._fallback && !onFallback) {
+        if ([502, 504, 520].includes(res.status) && this._fallback && !onFallback) {
           this._fallbackUntil = Date.now() + 10 * 60_000;
           if (this.log) console.warn(`[yapper] ${this.base} answered ${res.status}, using ${this._fallback} for 10 minutes`);
           if (method === 'GET' && attempt < retries) continue;
