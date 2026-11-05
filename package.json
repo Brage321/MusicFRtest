@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node Groove/index.js",
     "prestart:yapin": "npm install --prefix Yapin --omit=dev",
-    "start:yapin": "node Yapin/index.js"
+    "start:yapin": "node Yapin/index.js",
+    "start:feed": "node FeedFm/server.js"
   },
   "keywords": [
     "discord",

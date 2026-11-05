@@ -129,6 +129,10 @@ Enjoy hosting Groove Music on Bot-Hosting.net! 💙
 
 ## 🚀 Quick Setup
 
+### Feed.fm browser radio
+
+A separate browser-based radio player is available in [`FeedFm/`](./FeedFm/README.md). It does not play into Yapin voice; Feed.fm's JavaScript SDK is browser-based and station/radio oriented.
+
 ### Yapin bot (experimental)
 
 An initial Yapin music-bot port is available in [`Yapin/`](./Yapin/README.md). It searches and streams from the Audius catalog and supports a per-server queue through Yapin's LiveKit voice API. See its setup guide; the existing Discord bot and its `npm start` command are unchanged.

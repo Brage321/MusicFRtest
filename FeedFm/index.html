@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111318">
+    <title>Music Player</title>
+    <link rel="stylesheet" href="/style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/feed-media-audio-player@1.103.6/dist/feed-media-audio-player.min.js"></script>
+    <script defer src="/app.js"></script>
+</head>
+<body>
+    <main class="shell">
+        <header class="brand">
+            <div class="brand-mark" aria-hidden="true">♪</div>
+            <div>
+                <p class="eyebrow">YOUR LISTENING ROOM</p>
+                <h1>Music Player</h1>
+            </div>
+        </header>
+
+        <section class="card setup-card" id="setup-card">
+            <p class="eyebrow">GET STARTED</p>
+            <h2>Connect your player</h2>
+            <p class="muted">Enter the production credentials provided for your music account. They stay in this browser session and are not saved by this page.</p>
+            <form id="credentials-form">
+                <label for="token">Player token</label>
+                <input id="token" name="token" type="text" autocomplete="off" required>
+                <label for="secret">Player secret</label>
+                <input id="secret" name="secret" type="password" autocomplete="new-password" required>
+                <button class="button primary" type="submit">Load stations</button>
+            </form>
+            <p class="status" id="setup-status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="card player-card" id="player-card" hidden>
+            <div class="cover" aria-hidden="true">♪</div>
+            <p class="eyebrow">NOW PLAYING</p>
+            <h2 id="track-title">Choose a station</h2>
+            <p class="muted" id="track-artist">Your music will appear here</p>
+
+            <label for="station">Station</label>
+            <select id="station" disabled>
+                <option value="">Loading stations…</option>
+            </select>
+
+            <div class="controls">
+                <button class="button" id="play" type="button" disabled>Play</button>
+                <button class="button" id="pause" type="button" disabled>Pause</button>
+                <button class="button" id="skip" type="button" disabled>Skip</button>
+            </div>
+            <p class="status" id="player-status" role="status" aria-live="polite">Loading available stations…</p>
+            <button class="text-button" id="disconnect" type="button">Disconnect</button>
+        </section>
+
+        <footer>Music playback is subject to account availability and regional restrictions.</footer>
+    </main>
+</body>
+</html>
