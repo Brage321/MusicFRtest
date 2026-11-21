@@ -34,6 +34,7 @@ module.exports = {
         }
 
         const query = args.join(' ');
+        const isSpotifyUrl = /open\.spotify\.com\/(track|album|playlist|artist)\//i.test(query);
 
         
 
@@ -48,7 +49,7 @@ module.exports = {
 
         let res;
         try {
-            res = await client.poru.resolve({ query, requester: message.author });
+            res = await client.poru.resolve({ query, source: isSpotifyUrl ? 'spotify' : undefined, requester: message.author });
         } catch (e) {
             console.error('Poru resolve error:', e);
             const container = new ContainerBuilder()

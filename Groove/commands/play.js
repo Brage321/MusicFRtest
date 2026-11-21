@@ -55,7 +55,8 @@ module.exports = {
         }
 
         try {
-            let source = config.MUSIC.DEFAULT_PLATFORM || 'ytsearch';
+            const isSpotifyUrl = /open\.spotify\.com\/(track|album|playlist|artist)\//i.test(focusedValue);
+            let source = isSpotifyUrl ? 'spotify' : (config.MUSIC.DEFAULT_PLATFORM || 'ytsearch');
             const res = await client.poru.resolve({ query: focusedValue, source: source, requester: interaction.user });
             if (!res || !res.tracks || !Array.isArray(res.tracks) || res.tracks.length === 0) {
                 return interaction.respond([]);
@@ -89,9 +90,11 @@ module.exports = {
         await interaction.deferReply();
         const query = interaction.options.getString('search');
 
+        const isSpotifyUrl = /open\.spotify\.com\/(track|album|playlist|artist)\//i.test(query);
+
         let res;
         try {
-            res = await client.poru.resolve({ query, requester: interaction.user });
+            res = await client.poru.resolve({ query, source: isSpotifyUrl ? 'spotify' : undefined, requester: interaction.user });
         } catch (e) {
             console.error('Poru resolve error:', e);
             const container = new ContainerBuilder()
